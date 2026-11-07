@@ -300,3 +300,19 @@ test('a role profile keeps the parent session that started it', async () => {
   assert.equal(saved.profiles.find((profile) => profile.role === 'developer').parentSessionId, 'session-manager-1')
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('the Kanban mirror maps a task stage or status onto a real board column', async () => {
+  const kanban = await import('../lib/kanban.js')
+  const board = { columns: [{ id: 'c1', title: 'Todo' }, { id: 'c60', title: 'Ready' }, { id: 'c2', title: 'In Progress' }, { id: 'c5', title: 'Test' }, { id: 'c3', title: 'Review' }, { id: 'c4', title: 'Done' }], completedColumnId: 'c4' }
+  assert.equal(kanban.columnKeyFor({ status: 'queued', stage: 'spec' }), 'ready')
+  assert.equal(kanban.columnKeyFor({ status: 'active', stage: 'build' }), 'in-progress')
+  assert.equal(kanban.columnKeyFor({ status: 'active', stage: 'verify' }), 'test')
+  assert.equal(kanban.columnKeyFor({ status: 'awaiting_approval', stage: null }), 'review')
+  assert.equal(kanban.columnKeyFor({ status: 'accepted', stage: null }), 'done')
+  assert.equal(kanban.resolveColumnId(board, 'in-progress'), 'c2')
+  assert.equal(kanban.resolveColumnId(board, 'review'), 'c3')
+  assert.equal(kanban.resolveColumnId(board, 'done'), 'c4')
+  assert.equal(kanban.resolveColumnId({ columns: [{ id: 'x', title: 'Свои дела' }] }, 'in-progress'), null)
+  assert.deepEqual(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), { id: 'k7', columnId: 'c5' })
+  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify' }, board), null, 'a task without a mirrored card is not moved')
+})

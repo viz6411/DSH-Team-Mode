@@ -16,7 +16,7 @@
         maxConcurrentWorkers: 3
         maxProfiles: 8
         maxTasks: 256
-        kanbanSync: false
+        kanbanSync: true
         workflow:
           stages:
             - { id: spec,   role: designer,  requires: [] }

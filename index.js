@@ -18,7 +18,7 @@ import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
 import { boardView } from './lib/board.js'
-import { cardPayload, transitionComment, cardIdOf } from './lib/kanban.js'
+import { cardPayload, transitionComment, cardIdOf, movePayload } from './lib/kanban.js'
 import { RoleCatalog } from './lib/roles.js'
 import { normalizeWorkflow, activeWorkerCount } from './lib/workflow.js'
 
@@ -155,12 +155,25 @@ export function apply(ctx, config) {
     if (!created) return null
     if (!created.ok) return { kanbanNote: `kanban mirror failed: ${created.error}` }
     const cardId = cardIdOf(created.value)
-    if (cardId) await store.mutate(workspace.id, workspace.path, (data) => board.setKanbanCardId(data, task.id, cardId))
+    if (!cardId) return { kanbanCardId: null }
+    await store.mutate(workspace.id, workspace.path, (data) => board.setKanbanCardId(data, task.id, cardId))
+    await mirrorMove(agent, { ...task, kanbanCardId: cardId })
     return { kanbanCardId: cardId }
+  }
+
+  /** Move the mirrored card to the column its current stage or status maps to. */
+  const mirrorMove = async (agent, task) => {
+    if (!config.kanbanSync || !task?.kanbanCardId || !agent) return
+    const read = await kanbanCall(agent, 'kanban_get', {})
+    if (!read?.ok) return
+    const move = movePayload(task, read.value?.board)
+    if (!move) return
+    await kanbanCall(agent, 'kanban_move_card', move)
   }
 
   const mirrorComment = async (agent, task, event) => {
     if (!task?.kanbanCardId) return
+    await mirrorMove(agent, task)
     await kanbanCall(agent, 'kanban_add_comment', { id: task.kanbanCardId, content: transitionComment(task, event) })
   }
 
@@ -624,6 +637,39 @@ export function apply(ctx, config) {
       })
       await recordPanelSignal('probe-delegate', outcome?.ok ? 'ok' : outcome?.error ?? 'failed')
       return outcome
+    },
+    /**
+     * Installer self-check (A6): run one real stage hand-off and report exactly why it worked or did
+     * not. A hand-off failure is otherwise invisible — the board mutation already happened, and only
+     * the note explains why the next role never started.
+     */
+    async probeHandOff(payload) {
+      const workspaceId = payload?.workspaceId
+      if (!workspaceId) return { ok: false, error: 'workspaceId is required' }
+      const sender = payload?.senderSessionId ? ctx.agents.get(payload.senderSessionId) : null
+      const started = Date.now()
+      const outcome = await store.mutate(workspaceId, payload?.path, async (current) => {
+        current.__workflow = workflow
+        current.__workflowConfig = workflowConfig
+        const task = board.findTask(current, payload?.taskId)
+        if (!task) return { data: current, result: { ok: false, error: `task "${payload?.taskId}" not found` } }
+        return { data: current, result: await handOff(current, task, sender ?? undefined) }
+      })
+      const data = await dataOf(workspaceId, payload?.path)
+      const task = board.findTask(data, payload?.taskId)
+      await recordPanelSignal('probe-handoff', `${payload?.taskId}: ${outcome?.ok ? 'ok' : outcome?.error ?? outcome?.note ?? 'failed'}`)
+      return {
+        ...outcome,
+        elapsedMs: Date.now() - started,
+        task: task ? taskView(task) : null,
+        profiles: (data.profiles ?? []).map((profile) => ({
+          role: profile.role,
+          sessionId: profile.sessionId,
+          presetId: profile.presetId,
+          parentSessionId: profile.parentSessionId ?? null,
+          activity: liveStatus(profile.sessionId),
+        })),
+      }
     },
     /**
      * Install self-check (A17): the preset roster the mode picker will actually offer, with the
