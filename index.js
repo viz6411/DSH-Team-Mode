@@ -249,7 +249,12 @@ export function apply(ctx, config) {
   }
 
   const mirrorComment = async (workspace, task, event, seedAgent) => {
-    if (!workspace || !task?.kanbanCardId) return
+    if (!workspace || !task) return
+    if (!task.kanbanCardId) {
+      const created = await mirrorCard(workspace, task, seedAgent)
+      if (!created?.kanbanCardId) return
+      task = { ...task, kanbanCardId: created.kanbanCardId }
+    }
     for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
       const moved = await mirrorMove(candidate, task)
       const commented = await kanbanCall(candidate, 'kanban_add_comment', { id: task.kanbanCardId, content: transitionComment(task, event) })
@@ -647,6 +652,9 @@ export function apply(ctx, config) {
   }
 
   // ---- Panel API for @viz/dsh-team-mode/client ----
+  /** Role editor actions are called with `roleId` by the panel and with `role` by installers. */
+  const roleIdOf = (payload) => payload?.roleId ?? payload?.role
+
   const panel = {
     async workspaces() {
       const registry = ctx.get('workspaceRegistry')
@@ -675,14 +683,14 @@ export function apply(ctx, config) {
       return { ok: true, roles: await roles.list() }
     },
     async readRole(payload) {
-      const role = await roles.read(payload.roleId)
+      const role = await roles.read(roleIdOf(payload))
       return role ? { ok: true, role } : { ok: false, error: `role "${payload.roleId}" not found` }
     },
     async saveRole(payload) {
-      return roles.write(payload.roleId, payload)
+      return roles.write(roleIdOf(payload), payload)
     },
     async deleteRole(payload) {
-      return roles.remove(payload.roleId)
+      return roles.remove(roleIdOf(payload))
     },
     async interrupt(payload) {
       const data = await dataOf(payload.workspaceId, payload.path)
@@ -722,6 +730,28 @@ export function apply(ctx, config) {
       return { ok: true }
     },
     /** Panel keep-alive: proves on the Host side that the browser actually executed the Client half. */
+    async reconcile(payload) {
+      const workspaceId = payload?.workspaceId
+      if (!workspaceId) return { ok: false, error: 'workspaceId is required' }
+      const reopened = await store.mutate(workspaceId, payload?.path, (data) => {
+        data.__workflow = workflow
+        data.__workflowConfig = workflowConfig
+        return board.reconcileInterrupted(data, (sessionId) => Boolean(ctx.agents.get(sessionId)))
+      })
+      await recordPanelSignal('reconcile', `${workspaceId}: ${reopened.length} task(s) reopened`)
+      const data = await dataOf(workspaceId, payload?.path)
+      return {
+        ok: true,
+        reopened,
+        tasks: (data.tasks ?? []).filter((task) => task.status === 'active' || task.status === 'queued').map(taskView),
+        profiles: (data.profiles ?? []).map((profile) => ({
+          role: profile.role,
+          sessionId: profile.sessionId,
+          activity: liveStatus(profile.sessionId),
+          personaDrift: Boolean(profile.personaDrift),
+        })),
+      }
+    },
     async ping(payload) {
       await recordPanelSignal('ping', payload?.detail ?? 'apply')
       ctx.logger?.info?.(`dsh-team-mode: panel client alive (${payload?.detail ?? 'apply'})`)
@@ -791,6 +821,17 @@ export function apply(ctx, config) {
      * not. A hand-off failure is otherwise invisible — the board mutation already happened, and only
      * the note explains why the next role never started.
      */
+    async probeForward(payload) {
+      const workspaceId = payload?.workspaceId
+      if (!workspaceId) return { ok: false, error: 'workspaceId is required' }
+      const data = await dataOf(workspaceId, payload?.path)
+      const managerId = data.managerSessionId
+      const managerAgent = managerId ? ctx.agents.get(managerId) : null
+      if (!managerAgent) return { ok: false, error: `the Manager session ${managerId ?? '(none bound)'} is not live, so the note cannot be delivered` }
+      const result = await tools.forward({ agent: managerAgent, role: payload?.role, text: payload?.text ?? '' })
+      await recordPanelSignal('probe-forward', `${payload?.role}: ${result?.ok ? 'ok' : result?.error ?? result?.note ?? 'failed'}`)
+      return { ...result, profiles: ((await dataOf(workspaceId, payload?.path)).profiles ?? []).map((profile) => ({ role: profile.role, sessionId: profile.sessionId, activity: liveStatus(profile.sessionId) })) }
+    },
     async probeHandOff(payload) {
       const workspaceId = payload?.workspaceId
       if (!workspaceId) return { ok: false, error: 'workspaceId is required' }
