@@ -67,4 +67,4 @@ Start a chat with **Team Manager**, then:
   page reload, not from the install log alone.
 - Preset rows mount lazily with the preset: the role row is proven live only when a Team preset is
   actually selected in a chat.
-- `kanbanSync` is declared but not implemented in 0.1.0; enabling it does nothing yet.
+- `kanbanSync` (default `false`) projects a card on delegation and appends a comment on claim/complete through the Kanban plugin's own tools. Card *status columns* are not moved, and panel-driven transitions (Approve / Send back) are not projected because a panel action has no acting agent. Enabling it requires `@alpacachen/dsh-kanban` in the profile; without it the projection is skipped and Team Mode works unchanged.

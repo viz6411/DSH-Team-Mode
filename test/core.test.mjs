@@ -9,6 +9,7 @@ import { normalizeWorkflow, gateDelegate, gateClaim, gateComplete, gateConcurren
 import { WorkspaceStore, emptyWorkspace } from '../lib/store.js'
 import * as board from '../lib/board.js'
 import { RoleCatalog } from '../lib/roles.js'
+import { cardPayload, transitionComment, cardIdOf } from '../lib/kanban.js'
 
 const WORKFLOW = {
   stages: [
@@ -210,4 +211,62 @@ test('ids are unique and prefixed', () => {
   const b = newId('tm')
   assert.match(a, /^tm-[0-9a-f-]{36}$/)
   assert.notEqual(a, b)
+})
+
+test('kanban projection payload is a readable mirror of the task', () => {
+  const task = {
+    id: 'task-1',
+    subject: 'Add an “Ограничения” section to README',
+    brief: 'Five lines about environment limits.',
+    acceptance: 'Section exists and names RAM, model speed, concurrency.',
+    stage: 'build',
+    ownerRole: 'developer',
+    status: 'active',
+    iterations: 1,
+    blockedBy: ['task-0'],
+    writeScopes: ['README.md'],
+    kanbanCardId: 'card-9',
+  }
+  const payload = cardPayload(task)
+  assert.equal(payload.title, '[TM task-1] Add an “Ограничения” section to README')
+  assert.equal(payload.assignee, 'developer')
+  assert.equal(payload.label, 'team-mode')
+  assert.ok(payload.note.includes('Five lines about environment limits.'))
+  assert.ok(payload.note.includes('`task-0`'))
+  assert.ok(payload.note.includes('README.md'))
+  assert.ok(payload.note.includes('mirror'))
+  assert.ok(payload.title.length <= 120 && payload.note.length <= 1900)
+
+  const comment = transitionComment(task, { kind: 'advance', role: 'developer', text: 'stage build done' })
+  assert.ok(comment.startsWith('[TM task-1] advance: in progress @ build'))
+  assert.ok(comment.includes('by developer'))
+  assert.ok(comment.includes('iteration 1'))
+  assert.ok(comment.includes('stage build done'))
+})
+
+test('kanban projection stays off unless configured, and never invents a card id', async () => {
+  const task = { id: 'task-2', subject: 'x', brief: '', acceptance: '', stage: 'spec', ownerRole: 'designer', status: 'active' }
+  assert.equal(cardIdOf(undefined), null)
+  assert.equal(cardIdOf({ ok: true }), null)
+  assert.equal(cardIdOf({ card: { id: 'c1' } }), 'c1')
+  assert.equal(cardIdOf({ id: 7 }), '7')
+  assert.equal(cardPayload(task).assignee, 'designer')
+})
+
+test('the mirrored card id is stored on the task and survives a reload', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'tm-board-'))
+  const store = new WorkspaceStore({ info() {}, warn() {} })
+  store.dir = dir
+  const created = await store.mutate('ws-kanban', '/tmp/ws-kanban', (data) => {
+    const made = board.createTask(data, WORKFLOW, { subject: 'mirror me', brief: 'b', acceptance: 'a' })
+    board.setKanbanCardId(data, made.task.id, 'card-42')
+    board.setKanbanCardId(data, made.task.id, 'card-43')
+    return made.task.id
+  })
+  const reloaded = await store.load('ws-kanban')
+  const task = reloaded.tasks.find((item) => item.id === created)
+  assert.equal(task.kanbanCardId, 'card-43')
+  await store.mutate('ws-kanban', '/tmp/ws-kanban', (data) => board.setKanbanCardId(data, 'missing-task', 'card-1'))
+  assert.equal((await store.load('ws-kanban')).tasks[0].kanbanCardId, 'card-43')
+  rmSync(dir, { recursive: true, force: true })
 })

@@ -636,8 +636,17 @@ window.__ModuleLoader__.load({
             localeMounted = true
           }
         } catch (cause) {
-          console.warn('dsh-team-mode: locale dictionary registration failed', cause)
-          report('clientError', { message: `locale register: ${cause?.message ?? cause}` })
+          // The bundle is evaluated twice per page (once inside a combined group, once through its
+          // own row), and each copy mounts its own plugin instance with its own module state. The
+          // second copy therefore collides with the first on (namespace, locale): that is expected,
+          // not a failure, and the dictionaries are already registered.
+          const text = String(cause?.message ?? cause)
+          if (text.includes('already has locale')) {
+            console.info('dsh-team-mode: locale dictionaries already registered by the other mount of this bundle')
+          } else {
+            console.warn('dsh-team-mode: locale dictionary registration failed', cause)
+            report('clientError', { message: `locale register: ${text}` })
+          }
         }
         try {
           const bound = ctx.locale.bind(NS)

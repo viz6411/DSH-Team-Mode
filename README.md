@@ -77,7 +77,7 @@ through the board.
 | `workflow.stages` | spec/designer → build/developer → verify/tester → review/reviewer | stage machine |
 | `workflow.humanGate` | `true` | the last stage ends in human acceptance |
 | `workflow.reworkStage` | `build` | where a `reject` verdict returns the task |
-| `kanbanSync` | `false` | reserved: mirror board tasks into `@alpacachen/dsh-kanban` cards |
+| `kanbanSync` | `false` | one-way projection of tasks into `@alpacachen/dsh-kanban`: a card is created on delegation and every transition appends a comment on it (status columns are not moved) |
 
 State per workspace: `$DSH_HOME/team-mode/workspaces/<workspace>.json` (Manager binding, role
 profiles with their durable session ids, the task board, an event journal). Atomic writes, corrupt

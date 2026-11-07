@@ -18,6 +18,7 @@ import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
 import { boardView } from './lib/board.js'
+import { cardPayload, transitionComment, cardIdOf } from './lib/kanban.js'
 import { RoleCatalog } from './lib/roles.js'
 import { normalizeWorkflow, activeWorkerCount } from './lib/workflow.js'
 
@@ -127,6 +128,38 @@ export function apply(ctx, config) {
   const workflowConfig = toWorkflowConfig(config)
   const workflow = normalizeWorkflow(workflowConfig)
   const abortSignal = () => new AbortController().signal
+
+  /**
+   * Kanban projection (spec §5.5, `kanbanSync`): the board is a human-readable mirror written
+   * through the Kanban plugin's own tools, so its per-workspace rules stay with the Kanban plugin.
+   * When the plugin is absent the call is skipped and Team Mode runs without it.
+   */
+  const kanbanCall = async (agent, toolName, args) => {
+    if (!config.kanbanSync || !agent) return null
+    if (!ctx.tools?.get?.(toolName, agent)) return null
+    try {
+      const result = await ctx.tools.execute({ callId: newId('call'), name: toolName, arguments: args, agent, signal: abortSignal() })
+      if (result?.isError) return { ok: false, error: result?.error?.message ?? `${toolName} failed` }
+      return { ok: true, value: result?.value }
+    } catch (error) {
+      ctx.logger?.warn?.(`dsh-team-mode: kanban projection "${toolName}" failed: ${error?.message ?? error}`)
+      return { ok: false, error: error?.message ?? String(error) }
+    }
+  }
+
+  const mirrorCard = async (agent, workspace, task) => {
+    const created = await kanbanCall(agent, 'kanban_add_card', cardPayload(task))
+    if (!created) return null
+    if (!created.ok) return { kanbanNote: `kanban mirror failed: ${created.error}` }
+    const cardId = cardIdOf(created.value)
+    if (cardId) await store.mutate(workspace.id, workspace.path, (data) => board.setKanbanCardId(data, task.id, cardId))
+    return { kanbanCardId: cardId }
+  }
+
+  const mirrorComment = async (agent, task, event) => {
+    if (!task?.kanbanCardId) return
+    await kanbanCall(agent, 'kanban_add_comment', { id: task.kanbanCardId, content: transitionComment(task, event) })
+  }
 
   /** Diagnostic trail for the browser half: the Host log is not journald here, so keep it on disk. */
   const recordPanelSignal = async (kind, detail) => {
@@ -295,6 +328,10 @@ export function apply(ctx, config) {
           },
         }
       })
+      if (data.result?.task) {
+        const mirror = await mirrorCard(agent, workspace, data.result.task)
+        if (mirror) Object.assign(data.result, mirror)
+      }
       return data.result
     },
 
@@ -351,6 +388,7 @@ export function apply(ctx, config) {
       const claimed = board.claimTask(data, workflowConfig, taskId, role, expectedRevision)
       if (!claimed.ok) return claimed
       await store.mutate(workspace.id, workspace.path, () => undefined)
+      await mirrorComment(agent, claimed.task, { kind: 'claimed', role, text: `owner ${role}, revision ${claimed.task.revision}` })
       return { ok: true, task: taskView(claimed.task) }
     },
 
@@ -385,6 +423,9 @@ export function apply(ctx, config) {
         }
         return { data, result: { ok: hand.ok, task: taskView(task), action: completed.action, note: hand.error ?? null } }
       })
+      if (result?.task) {
+        await mirrorComment(agent, result.task, { kind: result.action ?? 'completed', role, text: result.note ?? '' })
+      }
       return result
     },
 
