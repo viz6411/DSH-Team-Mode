@@ -18,7 +18,7 @@ import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
 import { boardView } from './lib/board.js'
-import { cardTitle, cardPayload, transitionComment, cardIdOf, movePayload, toolFailure as kanbanToolFailure, hasLabel as kanbanHasLabel } from './lib/kanban.js'
+import { CARD_LABEL, cardTitle, cardPayload, transitionComment, cardIdOf, movePayload, toolFailure as kanbanToolFailure, hasLabel as kanbanHasLabel } from './lib/kanban.js'
 import { RoleCatalog } from './lib/roles.js'
 import { normalizeWorkflow, activeWorkerCount } from './lib/workflow.js'
 

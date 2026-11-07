@@ -98,8 +98,8 @@ for (const file of ['lib/kanban.js', 'lib/board.js']) {
       if (name) imported.add(name)
     }
   }
-  for (const match of source.matchAll(/export (?:async )?function (\w+)/g)) {
-    const name = match[1]
+  for (const match of source.matchAll(/export (?:async )?function (\w+)|export const ([A-Z_][A-Z0-9_]*)|export const (\w+)(?= =)/g)) {
+    const name = match[1] ?? match[2] ?? match[3]
     if (new RegExp(`(?<![.\\w])${name}\\(`).test(host) && !imported.has(name)) {
       failures.push(`index.js calls ${name} exported by ${file} but does not import it`)
     }
