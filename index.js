@@ -196,7 +196,7 @@ export function apply(ctx, config) {
   }
 
   const ensureProfile = async ({ data, role, managerAgent, brief }) => {
-    const spec = roles.spec(role)
+    const spec = await roles.spec(role)
     if (!spec) return { ok: false, error: `role "${role}" has no agent.md (${config.rolesDir}/${role}.md)` }
     const existing = board.profileOf(data, role)
     if (existing) {
@@ -252,7 +252,7 @@ export function apply(ctx, config) {
     const view = boardView(data, workflowConfig)
     view.workspacePath = data.workspacePath ?? null
     view.profiles = view.profiles.map((profile) => ({ ...profile, activity: liveStatus(profile.sessionId) }))
-    view.roles = roles.list().map((role) => ({ id: role.id, name: role.name, description: role.description, presetId: role.presetId }))
+    view.roles = (await roles.list()).map((role) => ({ id: role.id, name: role.name, description: role.description, presetId: role.presetId }))
     view.workflow = { stages: workflow.stages, humanGate: workflow.accept.humanGate, rework: workflow.rework }
     view.activeWorkers = activeWorkerCount(data)
     view.limits = { maxConcurrentWorkers: config.maxConcurrentWorkers, maxProfiles: config.maxProfiles, maxTasks: config.maxTasks }
@@ -278,7 +278,7 @@ export function apply(ctx, config) {
       const workspace = await workspaceOfAgent(agent)
       if (!workspace) return { ok: false, error: 'cannot resolve the workspace of this session' }
       const data = await store.mutate(workspace.id, workspace.path, async (data) => {
-        const bound = ensureManager(data, agent)
+        const bound = await ensureManager(data, agent)
         const created = board.createTask(data, workflowConfig, { subject, brief, acceptance, blockedBy, writeScopes })
         if (!created.ok) return { data, result: created }
         const task = created.task
@@ -338,7 +338,7 @@ export function apply(ctx, config) {
       const data = await dataOf(workspace.id, workspace.path)
       const profile = board.profileOf(data, role)
       if (!profile) return { ok: false, error: `role "${role}" has no profile in this workspace` }
-      if (!roleOfAgent(profile, config.presetPrefix) && !roles.spec(role)) return { ok: false, error: `unknown role "${role}"` }
+      if (!roleOfAgent(profile, config.presetPrefix) && !(await roles.spec(role))) return { ok: false, error: `unknown role "${role}"` }
       return deliver(agent, profile.sessionId, 'answer', text ?? '')
     },
 
@@ -432,10 +432,10 @@ export function apply(ctx, config) {
       return { ok: true, ...(await snapshot(payload.workspaceId, payload.path)) }
     },
     async roles() {
-      return { ok: true, roles: roles.list() }
+      return { ok: true, roles: await roles.list() }
     },
     async readRole(payload) {
-      const role = roles.read(payload.roleId)
+      const role = await roles.read(payload.roleId)
       return role ? { ok: true, role } : { ok: false, error: `role "${payload.roleId}" not found` }
     },
     async saveRole(payload) {
@@ -495,7 +495,15 @@ export function apply(ctx, config) {
     version: 1,
     config,
     workflow,
-    roles: { list: roles.list, read: roles.read, write: roles.write, remove: roles.remove, spec: roles.spec },
+    // The catalog methods are class methods: expose them bound to the catalog so a consumer can call
+    // them straight off the Service without losing `this`.
+    roles: {
+      list: (...args) => roles.list(...args),
+      read: (...args) => roles.read(...args),
+      write: (...args) => roles.write(...args),
+      remove: (...args) => roles.remove(...args),
+      spec: (...args) => roles.spec(...args),
+    },
     tools,
     panel,
     snapshot,
