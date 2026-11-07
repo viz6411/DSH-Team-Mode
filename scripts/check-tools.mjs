@@ -20,6 +20,13 @@ const host = read('index.js')
 const roleRow = read('role.js')
 const client = read('client.js')
 
+/**
+ * A mutation callback returns its result directly. Returning `{ data, result }` instead hands the whole
+ * workspace object — which carries a `log` function — to a tool, and the Harness rejects such a value as
+ * `INVALID_TOOL_OUTPUT: value is not lossless JSON`, so the role agent never sees the real outcome.
+ */
+require(!/return \{ data, result/.test(host), 'index.js returns a { data, result } wrapper from a store.mutate callback')
+
 /** Backend names declared in `const tools = { ... }` inside apply(). */
 function objectKeys(source, marker) {
   const start = source.indexOf(marker)

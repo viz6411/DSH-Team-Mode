@@ -316,3 +316,18 @@ test('the Kanban mirror maps a task stage or status onto a real board column', a
   assert.deepEqual(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), { id: 'k7', columnId: 'c5' })
   assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify' }, board), null, 'a task without a mirrored card is not moved')
 })
+
+test('store.mutate returns exactly what its callback returns and persists the mutation', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ws-mutate-'))
+  const store = new WorkspaceStore({ info() {}, warn() {} })
+  store.dir = dir
+  const outcome = await store.mutate('ws-mutate', dir, async (data) => {
+    board.touchProfile(data, 'reviewer', { sessionId: 'tm-rev', presetId: 'team-reviewer', personaHash: 'h', parentSessionId: 'session-m' })
+    return { ok: true, value: 7, nested: { kept: true } }
+  })
+  assert.deepEqual(outcome, { ok: true, value: 7, nested: { kept: true } })
+  const saved = JSON.parse((await import('node:fs')).readFileSync(join(dir, 'ws-mutate.json'), 'utf8'))
+  assert.equal(saved.profiles[0].role, 'reviewer')
+  assert.equal(saved.profiles[0].parentSessionId, 'session-m')
+  rmSync(dir, { recursive: true, force: true })
+})

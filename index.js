@@ -357,29 +357,26 @@ export function apply(ctx, config) {
     async delegate({ agent, subject, brief, acceptance, blockedBy, writeScopes }) {
       const workspace = await workspaceOfAgent(agent)
       if (!workspace) return { ok: false, error: 'cannot resolve the workspace of this session' }
-      const data = await store.mutate(workspace.id, workspace.path, async (data) => {
+      const result = await store.mutate(workspace.id, workspace.path, async (data) => {
         const bound = await ensureManager(data, agent)
         const created = board.createTask(data, workflowConfig, { subject, brief, acceptance, blockedBy, writeScopes })
-        if (!created.ok) return { data, result: created }
+        if (!created.ok) return created
         const task = created.task
         let hand = { ok: true }
         if (task.status === 'active') hand = await handOff(data, task, agent)
         return {
-          data,
-          result: {
-            ok: hand.ok,
-            task: taskView(task),
-            queued: created.queued,
-            queueReason: created.queueReason ?? null,
-            note: bound.note ?? hand.error ?? null,
-          },
+          ok: hand.ok,
+          task: taskView(task),
+          queued: created.queued ?? false,
+          queueReason: created.queueReason ?? null,
+          note: bound.note ?? hand.error ?? null,
         }
       })
-      if (data.result?.task) {
-        const mirror = await mirrorCard(agent, workspace, data.result.task)
-        if (mirror) Object.assign(data.result, mirror)
+      if (result?.task) {
+        const mirror = await mirrorCard(agent, workspace, result.task)
+        if (mirror) Object.assign(result, mirror)
       }
-      return data.result
+      return result
     },
 
     async status({ agent }) {
@@ -436,10 +433,12 @@ export function apply(ctx, config) {
       if (!workspace) return { ok: false, error: 'cannot resolve the workspace of this session' }
       const role = roleOfAgent(agent, config.presetPrefix)
       if (!role) return { ok: false, error: 'this session is not a Team Mode role agent' }
-      const data = await store.load(workspace.id, workspace.path)
-      const claimed = board.claimTask(data, workflowConfig, taskId, role, expectedRevision)
+      const claimed = await store.mutate(workspace.id, workspace.path, async (data) => {
+        data.__workflow = workflow
+        data.__workflowConfig = workflowConfig
+        return board.claimTask(data, workflowConfig, taskId, role, expectedRevision)
+      })
       if (!claimed.ok) return claimed
-      await store.mutate(workspace.id, workspace.path, () => undefined)
       await mirrorComment(agent, claimed.task, { kind: 'claimed', role, text: `owner ${role}, revision ${claimed.task.revision}` })
       return { ok: true, task: taskView(claimed.task) }
     },
@@ -462,7 +461,7 @@ export function apply(ctx, config) {
       if (!role) return { ok: false, error: 'this session is not a Team Mode role agent' }
       const result = await store.mutate(workspace.id, workspace.path, async (data) => {
         const completed = board.completeTask(data, workflowConfig, taskId, role, { report, evidence, verdict, expectedRevision })
-        if (!completed.ok) return { data, result: completed }
+        if (!completed.ok) return completed
         const task = completed.task
         let hand = { ok: true }
         if (task.ownerRole && task.ownerRole !== role) hand = await handOff(data, task, agent)
@@ -473,7 +472,7 @@ export function apply(ctx, config) {
             await deliver(agent, managerId, 'awaiting-approval', `Task ${task.id} "${task.subject}" finished every stage and needs human acceptance in the Team panel.`)
           }
         }
-        return { data, result: { ok: hand.ok, task: taskView(task), action: completed.action, note: hand.error ?? null } }
+        return { ok: hand.ok, task: taskView(task), action: completed.action, note: hand.error ?? null }
       })
       if (result?.task) {
         await mirrorComment(agent, result.task, { kind: result.action ?? 'completed', role, text: result.note ?? '' })
@@ -490,10 +489,10 @@ export function apply(ctx, config) {
         const managerId = data.managerSessionId
         const managerAgent = managerId ? ctx.agents.get(managerId) : null
         if (!managerAgent) {
-          return { data, result: { ok: false, stored: true, error: 'no live Manager session; the note was stored on the board only' } }
+          return { ok: false, stored: true, error: 'no live Manager session; the note was stored on the board only' }
         }
         const delivered = await deliver(agent, managerId, kind, `role ${role}, task ${taskId ?? '-'}: ${text}`)
-        return { data, result: delivered.ok ? { ok: true, stored: true } : { ok: false, stored: true, error: delivered.error } }
+        return delivered.ok ? { ok: true, stored: true } : { ok: false, stored: true, error: delivered.error }
       })
       return result
     },
@@ -547,22 +546,22 @@ export function apply(ctx, config) {
     async approve(payload) {
       const result = await store.mutate(payload.workspaceId, payload.path, async (data) => {
         const approved = board.approveTask(data, payload.taskId, payload.note)
-        if (!approved.ok) return { data, result: approved }
+        if (!approved.ok) return approved
         const managerId = data.managerSessionId
         const managerAgent = managerId ? ctx.agents.get(managerId) : null
         if (managerAgent) {
           await deliver(managerAgent, managerId, 'approval', `The user approved task ${payload.taskId} in the Team panel. Report the outcome and continue the workflow.`)
         }
-        return { data, result: { ok: true, task: taskView(approved.task) } }
+        return { ok: true, task: taskView(approved.task) }
       })
       return result
     },
     async rejectApproval(payload) {
       const result = await store.mutate(payload.workspaceId, payload.path, async (data) => {
         const rejected = board.rejectApproval(data, payload.taskId, payload.note, payload.stageId)
-        if (!rejected.ok) return { data, result: rejected }
+        if (!rejected.ok) return rejected
         const hand = await handOff(data, rejected.task, null)
-        return { data, result: { ok: true, task: taskView(rejected.task), note: hand.ok ? null : hand.error } }
+        return { ok: true, task: taskView(rejected.task), note: hand.ok ? null : hand.error }
       })
       return result
     },
@@ -603,10 +602,8 @@ export function apply(ctx, config) {
           managerAgent: parent,
           brief: payload?.brief ?? 'Installer probe: no task is assigned yet, only report the tools you can call.',
         })
-        if (!ensured.ok) return { data, result: ensured }
+        if (!ensured.ok) return ensured
         return {
-          data,
-          result: {
             ok: true,
             created: ensured.created,
             role,
@@ -614,11 +611,10 @@ export function apply(ctx, config) {
             workspacePath: workspace.path,
             profile: board.profileOf(data, role),
             profiles: data.profiles ?? [],
-          },
         }
       })
-      await recordPanelSignal('probe-role', `${role} under ${parentId}: ${outcome?.result?.ok ? 'ok' : outcome?.result?.error ?? 'failed'}`)
-      return { ...outcome.result, elapsedMs: Date.now() - started }
+      await recordPanelSignal('probe-role', `${role} under ${parentId}: ${outcome?.ok ? 'ok' : outcome?.error ?? 'failed'}`)
+      return { ...outcome, elapsedMs: Date.now() - started }
     },
     /**
      * Installer self-check (A6): bind a live session as the workspace Manager and run one real
@@ -652,8 +648,8 @@ export function apply(ctx, config) {
         current.__workflow = workflow
         current.__workflowConfig = workflowConfig
         const task = board.findTask(current, payload?.taskId)
-        if (!task) return { data: current, result: { ok: false, error: `task "${payload?.taskId}" not found` } }
-        return { data: current, result: await handOff(current, task, sender ?? undefined) }
+        if (!task) return { ok: false, error: `task "${payload?.taskId}" not found` }
+        return await handOff(current, task, sender ?? undefined)
       })
       const data = await dataOf(workspaceId, payload?.path)
       const task = board.findTask(data, payload?.taskId)
