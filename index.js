@@ -466,6 +466,16 @@ export function apply(ctx, config) {
       await store.mutate(payload.workspaceId, payload.path, (data) => board.cancelTask(data, payload.taskId, payload.reason))
       return { ok: true }
     },
+    /** Panel keep-alive: proves on the Host side that the browser actually executed the Client half. */
+    async ping(payload) {
+      ctx.logger?.info?.(`dsh-team-mode: panel client alive (${payload?.detail ?? 'apply'})`)
+      return { ok: true }
+    },
+    /** Client-side failure report: the panel reports what threw instead of only failing silently. */
+    async clientError(payload) {
+      ctx.logger?.warn?.(`dsh-team-mode: client failure: ${payload?.message ?? 'unknown'}`)
+      return { ok: true }
+    },
   }
 
   const service = {

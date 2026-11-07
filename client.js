@@ -188,10 +188,11 @@ window.__ModuleLoader__.load({
 .team-note { width: 220px; }
 `
 
-    function TeamIcon() {
+    function TeamIcon({ size } = {}) {
+      const edge = typeof size === 'number' && size > 0 ? size : 16
       return h(
         'svg',
-        { viewBox: '0 0 24 24', width: 16, height: 16, 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.7 },
+        { viewBox: '0 0 24 24', width: edge, height: edge, 'aria-hidden': true, fill: 'none', stroke: 'currentColor', strokeWidth: 1.7 },
         h('circle', { cx: 12, cy: 7, r: 3 }),
         h('circle', { cx: 5, cy: 17, r: 2.4 }),
         h('circle', { cx: 19, cy: 17, r: 2.4 }),
@@ -592,14 +593,27 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'uiWorkspace'],
       apply(ctx) {
-        // Localized copy: the built-in locales register as one complete dictionary, the added
-        // Russian pack registers its own namespace dictionary. A locale failure must not stop the
-        // panel from mounting, so each step is isolated and reported to the console.
+        // Keep the Host informed of what the browser half actually did: without browser control the
+        // Host log is the only place a Client failure can be seen.
+        const report = (action, detail) => {
+          try {
+            void fetch('/api/team-mode', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ action, ...(detail || {}) }),
+            }).catch(() => undefined)
+          } catch {
+            /* the report is best effort only */
+          }
+        }
+        report('ping', { detail: 'apply' })
+
         let translate = (key) => DICTS.en[key] ?? key
         try {
           ctx.locale.register(NS, { en: DICTS.en, zh: DICTS.zh })
         } catch (cause) {
           console.warn('dsh-team-mode: locale dictionary registration failed', cause)
+          report('clientError', { message: `locale register: ${cause?.message ?? cause}` })
         }
         try {
           ctx.locale.addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' })
@@ -610,12 +624,14 @@ window.__ModuleLoader__.load({
           ctx.locale.register(NS, 'ru', DICTS.ru)
         } catch (cause) {
           console.warn('dsh-team-mode: Russian dictionary registration failed', cause)
+          report('clientError', { message: `locale ru register: ${cause?.message ?? cause}` })
         }
         try {
           const bound = ctx.locale.bind(NS)
           if (typeof bound === 'function') translate = (key) => bound(key) || DICTS.en[key] || key
         } catch (cause) {
           console.warn('dsh-team-mode: locale bind failed', cause)
+          report('clientError', { message: `locale bind: ${cause?.message ?? cause}` })
         }
         const t = translate
 
@@ -627,15 +643,28 @@ window.__ModuleLoader__.load({
           return () => tag.remove()
         }, 'team-mode.styles')
 
-        const disposeMain = ctx.slots.inject('main', () =>
-          ctx.slots.register({ name: 'main', key: 'team-mode' }, () => h(TeamPage, { t, uiWorkspace: ctx.uiWorkspace })),
-        )
-        const disposeIcon = ctx.slots.inject('sidebar.panellist', () =>
-          ctx.slots.register({ name: 'sidebar.panellist', id: 'team-mode', order: 16, label: () => t('panelTitle') }, () => h(TeamIcon)),
-        )
-        return () => {
-          disposeIcon()
-          disposeMain()
+        try {
+          // The `main` and `sidebar.panellist` cells belong to the layout domain: they are reached
+          // through the layout inject surface, the same way the shipped panel rows do.
+          const disposePanels = ctx.inject(['layout'], (surface) => {
+            const slots = surface.slots ?? ctx.slots
+            const disposeMain = slots.inject('main', () =>
+              slots.register({ name: 'main', key: 'team-mode' }, () => h(TeamPage, { t, uiWorkspace: ctx.uiWorkspace })),
+            )
+            const disposeIcon = slots.inject('sidebar.panellist', () =>
+              slots.register({ name: 'sidebar.panellist', id: 'team-mode', order: 16, label: () => t('panelTitle') }, (props) => h(TeamIcon, props)),
+            )
+            report('ping', { detail: 'slots registered' })
+            return () => {
+              disposeIcon()
+              disposeMain()
+            }
+          })
+          return () => disposePanels()
+        } catch (cause) {
+          console.error('dsh-team-mode: slot registration failed', cause)
+          report('clientError', { message: `slots: ${cause?.stack ?? cause}` })
+          return () => undefined
         }
       },
     }
