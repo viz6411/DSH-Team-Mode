@@ -270,3 +270,17 @@ test('the mirrored card id is stored on the task and survives a reload', async (
   assert.equal((await store.load('ws-kanban')).tasks[0].kanbanCardId, 'card-43')
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('tool results are lossless JSON: undefined keys are removed, null and finite numbers are kept', async () => {
+  const { jsonValue, toolResult } = await import('../lib/json.js')
+  assert.deepEqual(jsonValue({ ok: true, error: undefined, note: null, n: 3, bad: Number.NaN }), { ok: true, note: null, n: 3, bad: null })
+  assert.deepEqual(jsonValue([{ a: 1, b: undefined }, undefined]), [{ a: 1 }, null])
+  assert.equal(jsonValue(new Date('2026-11-07T00:00:00.000Z')), '2026-11-07T00:00:00.000Z')
+  assert.equal(jsonValue(() => 1), '() => 1')
+  const cycle = { ok: true }
+  cycle.self = cycle
+  assert.deepEqual(jsonValue(cycle), { ok: true, self: null })
+  const value = toolResult({ ok: false, error: undefined, note: 'no live Manager session', task: undefined }, 'Delegation failed: no live Manager session')
+  assert.deepEqual(value, { ok: false, note: 'no live Manager session', message: 'Delegation failed: no live Manager session' })
+  assert.deepEqual(JSON.parse(JSON.stringify(value)), value)
+})

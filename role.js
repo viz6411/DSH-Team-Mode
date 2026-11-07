@@ -8,6 +8,7 @@
  *   the direct question channel to the human (all escalation goes through the Manager).
  */
 import { configSchema } from './lib/schema.js'
+import { toolResult } from './lib/json.js'
 
 export const name = 'team-mode-role'
 export const inject = ['tools', 'systemPrompt', 'teamMode']
@@ -130,7 +131,7 @@ export async function apply(ctx, config) {
           blockedBy: args.blockedBy ?? [],
           writeScopes: args.writeScopes ?? [],
         })
-        return { ...result, message: message(result, result.ok ? `Task ${result.task?.id} delegated to ${result.task?.ownerRole}.` : `Delegation failed: ${result.error}`) }
+        return toolResult(result, message(result, result.ok ? `Task ${result.task?.id} delegated to ${result.task?.ownerRole}.` : `Delegation failed: ${result.error ?? result.note}`))
       },
     }))
 
@@ -141,7 +142,7 @@ export async function apply(ctx, config) {
       output: okText('Role profiles listed.'),
       async execute(_args, exec) {
         const result = await ctx.teamMode.tools.profiles({ agent: exec.agent })
-        return { ...result, message: message(result, JSON.stringify(result.profiles ?? result.error)) }
+        return toolResult(result, message(result, JSON.stringify(result.profiles ?? result.error)))
       },
     }))
 
@@ -152,7 +153,7 @@ export async function apply(ctx, config) {
       output: okText('Team status read.'),
       async execute(_args, exec) {
         const result = await ctx.teamMode.tools.status({ agent: exec.agent })
-        return { ...result, message: message(result, JSON.stringify({ tasks: result.tasks, profiles: result.profiles })) }
+        return toolResult(result, message(result, JSON.stringify({ tasks: result.tasks, profiles: result.profiles })))
       },
     }))
 
@@ -165,7 +166,7 @@ export async function apply(ctx, config) {
       output: okText('Interrupt requested.'),
       async execute(args, exec) {
         const result = await ctx.teamMode.tools.interrupt({ agent: exec.agent, role: args.role })
-        return { ...result, message: message(result, result.ok ? `Interrupted ${args.role}.` : `Interrupt failed: ${result.error}`) }
+        return toolResult(result, message(result, result.ok ? `Interrupted ${args.role}.` : `Interrupt failed: ${result.error}`))
       },
     }))
 
@@ -179,7 +180,7 @@ export async function apply(ctx, config) {
       output: okText('Message delivered to the role session.'),
       async execute(args, exec) {
         const result = await ctx.teamMode.tools.forward({ agent: exec.agent, role: args.role, text: args.text })
-        return { ...result, message: message(result, result.ok ? `Delivered to ${args.role}.` : `Delivery failed: ${result.error}`) }
+        return toolResult(result, message(result, result.ok ? `Delivered to ${args.role}.` : `Delivery failed: ${result.error}`))
       },
     }))
     return
@@ -192,7 +193,7 @@ export async function apply(ctx, config) {
     output: okText('Tasks listed.'),
     async execute(_args, exec) {
       const result = await ctx.teamMode.tools.tasks({ agent: exec.agent })
-      return { ...result, message: message(result, JSON.stringify(result.tasks ?? result.error)) }
+      return toolResult(result, message(result, JSON.stringify(result.tasks ?? result.error)))
     },
   }))
 
@@ -206,7 +207,7 @@ export async function apply(ctx, config) {
     output: okText('Task claimed.'),
     async execute(args, exec) {
       const result = await ctx.teamMode.tools.claim({ agent: exec.agent, taskId: args.taskId, expectedRevision: args.expectedRevision })
-      return { ...result, message: message(result, result.ok ? `Claimed ${args.taskId}.` : `Claim failed: ${result.error}`) }
+      return toolResult(result, message(result, result.ok ? `Claimed ${args.taskId}.` : `Claim failed: ${result.error ?? result.note}`))
     },
   }))
 
@@ -231,7 +232,7 @@ export async function apply(ctx, config) {
         evidence: args.evidence ?? '',
         expectedRevision: args.expectedRevision,
       })
-      return { ...result, message: message(result, result.ok ? `Task ${args.taskId}: ${result.action}.` : `Completion rejected: ${result.error}`) }
+      return toolResult(result, message(result, result.ok ? `Task ${args.taskId}: ${result.action}.` : `Completion rejected: ${result.error ?? result.note}`))
     },
   }))
 
@@ -247,7 +248,7 @@ export async function apply(ctx, config) {
     output: okText('Report sent to the Manager.'),
     async execute(args, exec) {
       const result = await ctx.teamMode.tools.report({ agent: exec.agent, taskId: args.taskId, kind: args.kind, text: args.text })
-      return { ...result, message: message(result, result.ok ? `Reported ${args.kind}.` : `Report stored on the board only: ${result.error}`) }
+      return toolResult(result, message(result, result.ok ? `Reported ${args.kind}.` : `Report stored on the board only: ${result.error}`))
     },
   }))
 }

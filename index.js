@@ -274,7 +274,12 @@ export function apply(ctx, config) {
     const role = task.ownerRole
     if (!role) return { ok: true, skipped: true }
     const managerAgent = data.managerSessionId ? ctx.agents.get(data.managerSessionId) : null
-    const authority = senderAgent && ctx.agents.get(senderAgent.id) === senderAgent ? senderAgent : managerAgent
+    // Every role profile is a direct child of the Manager session: the platform only allows a parent
+    // or a direct child to message a continuable child, so keeping one parent for the whole team is
+    // what makes `team_forward`, panel interrupt by parent address, and a new Manager chat reusing the
+    // profiles all work. The completing role is the fallback authority when the Manager is offline.
+    const liveSender = senderAgent && ctx.agents.get(senderAgent.id) === senderAgent ? senderAgent : null
+    const authority = managerAgent ?? liveSender
     if (!authority) return { ok: false, error: 'no live Manager session to authorize the hand-off' }
     const profile = await ensureProfile({ data, role, managerAgent: authority, brief: `${task.subject}\n${task.brief}` })
     if (!profile.ok) return profile
