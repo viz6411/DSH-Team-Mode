@@ -54,6 +54,25 @@ package name. Then reload the Harness page: the Team entry appears in the sideba
 4. When a task reaches `awaiting_approval`, review the evidence and press **Approve** (or
    **Send back** with a note, which returns the task to a named stage).
 
+## What has been measured in a real workspace
+
+One task ran the whole chain in four separate role sessions of one workspace — designer, developer,
+tester, reviewer — each stage carrying its brief and acceptance criteria, each hand-off a real delivery
+into that role's session. The last stage closed with `verdict: pass`, the board set `awaiting_approval`
+and told the Manager chat that a human decision is needed; the panel's Approve then closed the task. The
+role sessions stayed alive across tasks and hand-offs (four profiles in one workspace), roles escalated
+to the Manager with `team_report`, and the Team panel occupies a real slot in the Web UI
+(`sidebar.panellist` id `team-mode`, `main` key `team-mode`). Details and evidence: [docs/STATUS.md](docs/STATUS.md).
+
+Two things the **profile owner** has to provide, because they are not plugin code:
+
+- `@deepseek-ai/dsh-subagent` `maxActiveSubagents` in the profile patch caps how many role sessions can
+  be **resident at the same time**. At `1` the chain still works stage by stage, but two roles never run
+  in parallel; set it to at least `maxConcurrentWorkers`.
+- Host code reload. `remove_bundle` + `install_bundle` normally applies a new revision live; when live
+  role sessions hold the plugin's fibers the answer is `restart-required` (`unmanaged-plugin`) and the
+  running process keeps executing the previous revision until DSH is restarted.
+
 ## Tools
 
 Manager: `team_status`, `team_profiles`, `team_delegate`, `team_forward`, `team_interrupt`.
@@ -92,6 +111,10 @@ applies to profiles created after the change, and recreating a live profile is y
 
 ## Limits and honesty
 
+
+- The Kanban mirror (`kanbanSync`) is a one-way projection: card creation, stage-to-column moves and
+  transition comments, with the Host board as the source of truth. It runs as an agent that can see the
+  Kanban tools and records a reason in the diagnostics when it is skipped.
 - Role profiles are continuable subagents of the Manager session: while a Manager chat is closed
   the roles sleep and cold-resume on the next delivery. Their transcripts stay readable.
 - One Manager per workspace is active at a time; opening a new Team chat rebinds the Manager and

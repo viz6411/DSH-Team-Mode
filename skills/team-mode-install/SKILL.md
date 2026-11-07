@@ -58,3 +58,17 @@ Steps the agent then performs:
 - A Client half must never call `locale.addLanguage`: a language belongs to the shared catalog, and
   adding one breaks other plugins' locale registration. It also must not be mounted as a Host patch
   row (`window is not defined` fails the whole bundle).
+
+## Prove a stage hand-off
+
+After a delegation, verify the next stage really started in the next role's session:
+
+```
+POST /api/team-mode {"action":"probeHandOff","workspaceId":"<id>","taskId":"<task id>","senderSessionId":"<completing role session>"}
+```
+
+It answers with `ok`, `created` (a new profile or a reused one), the refusal reason if the platform
+would not start the profile, `handOffNote` when the fallback parent was used, the task view and every
+profile with its `parentSessionId` and live activity. A hand-off refused because the completing role is
+still resident is retried by the Host once that role's turn ends — check the board again a minute later
+before calling it a failure.
