@@ -13,7 +13,7 @@
  * - Human acceptance is gated on a real UI action in the Team panel, never on a Manager tool call.
  */
 import { join } from 'node:path'
-import { teamModeHome, newId } from './lib/util.js'
+import { teamModeHome, newId, fsPromises } from './lib/util.js'
 import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
@@ -127,6 +127,17 @@ export function apply(ctx, config) {
   const workflowConfig = toWorkflowConfig(config)
   const workflow = normalizeWorkflow(workflowConfig)
   const abortSignal = () => new AbortController().signal
+
+  /** Diagnostic trail for the browser half: the Host log is not journald here, so keep it on disk. */
+  const recordPanelSignal = async (kind, detail) => {
+    const fs = await fsPromises()
+    try {
+      await fs.mkdir(teamModeHome(), { recursive: true })
+      await fs.appendFile(join(teamModeHome(), 'panel-signals.log'), `${new Date().toISOString()} ${kind} ${String(detail ?? '')}\n`, 'utf8')
+    } catch {
+      /* diagnostics must never break the panel API */
+    }
+  }
 
   const workspaceOfAgent = async (agent) => {
     const cwd = agent?.session?.header?.cwd
@@ -468,11 +479,13 @@ export function apply(ctx, config) {
     },
     /** Panel keep-alive: proves on the Host side that the browser actually executed the Client half. */
     async ping(payload) {
+      await recordPanelSignal('ping', payload?.detail ?? 'apply')
       ctx.logger?.info?.(`dsh-team-mode: panel client alive (${payload?.detail ?? 'apply'})`)
       return { ok: true }
     },
     /** Client-side failure report: the panel reports what threw instead of only failing silently. */
     async clientError(payload) {
+      await recordPanelSignal('client-error', payload?.message ?? 'unknown')
       ctx.logger?.warn?.(`dsh-team-mode: client failure: ${payload?.message ?? 'unknown'}`)
       return { ok: true }
     },
