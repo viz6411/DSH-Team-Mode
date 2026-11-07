@@ -222,6 +222,7 @@ window.__ModuleLoader__.load({
     // Set by apply(): a render failure is reported to the Host, where the diagnostic file is the
     // only place a browser-side failure can be read.
     let panelFailure = () => undefined
+    let localeMounted = false
 
     function PanelGuard(props) {
       try {
@@ -628,7 +629,12 @@ window.__ModuleLoader__.load({
           // Only the built-in locales get a dictionary, and no language is added to the shared
           // catalog: adding a language changes what every other plugin's locale registration must
           // cover, which is a cross-plugin side effect a panel plugin must not cause.
-          ctx.locale.register(NS, { en: DICTS.en, zh: DICTS.zh })
+          // The half can be mounted twice in one page (bundled group plus its own row), so a second
+          // registration is skipped instead of reported as a duplicate failure.
+          if (!localeMounted) {
+            ctx.locale.register(NS, { en: DICTS.en, zh: DICTS.zh })
+            localeMounted = true
+          }
         } catch (cause) {
           console.warn('dsh-team-mode: locale dictionary registration failed', cause)
           report('clientError', { message: `locale register: ${cause?.message ?? cause}` })
