@@ -79,3 +79,23 @@ stay on disk under `$DSH_HOME/team-mode/`.
 Reinstall the bundle (local checkout: `remove_bundle` then `install_bundle` again; a linked
 checkout also re-reads its patch on the next composition). Role files and workspace state are not
 touched by an update.
+
+## Applying Host code updates (read this before testing a fix)
+
+Host code changes go live with `remove_bundle` + `install_bundle` (a `set_bundle` toggle does **not**
+reload Host code). If either call answers:
+
+```json
+{ "application": "restart-required", "restartReason": "unmanaged-plugin" }
+```
+
+the running process keeps the previous revision: live role sessions hold the plugin's fibers, and the
+Host will not tear them down. The repository and the installed package are correct — the live process is
+stale. A DSH restart (a human action) loads the new revision, or closing the role sessions first. Until
+then, a fix that is committed and installed is *not* what the running workspace executes: check
+`panel.diagnose` and `$DSH_HOME/team-mode/panel-signals.log` for signals the new code is expected to
+write, and if they are absent, the old revision is still running.
+
+Role prompts (`$DSH_HOME/team-mode/roles/<role>.md`, `roles/<role>.md`, and the `role.js` prompt
+suffix) are read when a role composition mounts. A session that already has the preset keeps its mounted
+revision; a **new** role session picks up the new text.

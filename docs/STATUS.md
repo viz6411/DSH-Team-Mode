@@ -20,7 +20,7 @@ it is not proven yet.
 | A15 | live | one workspace holds four durable role sessions — designer `tm-09de62a1…`, developer `tm-e17cd53f…`, tester `tm-f9b879b4…`, reviewer `tm-982f60c1…` — each a continuable subagent child of the Manager session, reused across tasks and hand-offs || concurrency test; `delegate` returns `queued` + `queueReason` |
 | A16 | A worker cannot call delegation or plugin-management tools | live | Tool list recorded in the created role session (`request/header`): `team_tasks`, `team_task_claim`, `team_task_complete`, `team_report` present; `subagent`, `spawn_teammate`, `plugin_manager`, `ask_user_question` absent |
 | A17 | One install puts the mode into a clean profile | live | `install_bundle` → `application: applied`, `warnings: []`; `diagnose` reports all six `team-*` presets selectable (`broken: null`) and the Team panel slots |
-| A18 | Optional rows are disable-able without breaking the core | unit + live | `kanbanSync: false` default, projection skipped when the Kanban plugin is absent for the agent |
+| A18 | Optional rows are disable-able without breaking the core | unit + live | `kanbanSync` defaults to `false` in code and the bundle patch enables it; the projection is skipped (now with a recorded reason) when the Kanban tools are not visible to the agent the mirror runs as |
 | A19 | Tests green | live | `npm test` 14/14, `npm run check:manifest` (manifest + tool/panel wiring + YAML dialect guards) |
 
 ## How the live evidence was produced
@@ -56,6 +56,7 @@ naming the setting; raising the value is a profile change and belongs to the hum
 ## Open items
 
 - A3 restart test, A11-A14 UI click-through, A6 full chain through `verify` and `review` with a human
-  approval, and Kanban status-column projection (only card creation and transition comments are
+  approval, and Kanban status-column projection (card creation, transition comments, and stage-to-column
+  moves are implemented and unit-tested; the live mirror needs the newest installed revision — see
   projected today).
 - `CHANGE_ME` in the repository URL until the GitHub address is known.
