@@ -68,3 +68,19 @@ Start a chat with **Team Manager**, then:
 - Preset rows mount lazily with the preset: the role row is proven live only when a Team preset is
   actually selected in a chat.
 - `kanbanSync` (default `false`) projects a card on delegation and appends a comment on claim/complete through the Kanban plugin's own tools. Card *status columns* are not moved, and panel-driven transitions (Approve / Send back) are not projected because a panel action has no acting agent. Enabling it requires `@alpacachen/dsh-kanban` in the profile; without it the projection is skipped and Team Mode works unchanged.
+
+## Round 5 additions (measured on this host)
+
+- **Persona drift (A4).** Write `$DSH_HOME/team-mode/roles/<role>.md` as an override, call
+  `panel.probeRole` for a role that already has a profile: `personaDrift` must be `true` for that role
+  only, and `false` again after the override is deleted. This also proves the user role directory wins
+  over the packaged one, and that `probeRole` on an existing profile costs no model turn.
+- **Panel content (A11).** `panel.snapshot` must return `managerSessionId`, the role catalog, every
+  profile with `presetId` and `activity`, the tasks with `stage`/`status`, and the workflow stages. A
+  workspace without a Manager returns `managerSessionId: null`, which is the only case where the panel
+  legitimately shows "no Manager yet".
+- **Interrupt (A14).** `panel.interrupt {workspaceId, role}` answers `{ok: true}` when the profile exists.
+  Interrupting a *running* role is verified by pressing the button in the panel while a role works.
+- **Hand-off (A6).** `panel.probeHandOff {workspaceId, taskId, senderSessionId}` reports whether the next
+  role profile was created or reused, its `parentSessionId`, and the platform's exact refusal reason if
+  it could not start. A refusal because the completing role is still resident is retried by the Host.

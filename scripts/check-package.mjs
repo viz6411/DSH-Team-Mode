@@ -60,6 +60,22 @@ const host = readFileSync(join(root, 'index.js'), 'utf8')
 require(!client.includes('document.body.append'), 'client.js must not append a second application to the page')
 require(!host.includes('@deepseek-ai/schemastery'), 'the Host half must not depend on schemastery at runtime')
 
+
+// The shipped patch and the documented workflow must not drift apart: what a user installs has to be
+// the stage machine the README describes.
+{
+  const patch = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
+  const readme = readFileSync(join(root, 'README.md'), 'utf8')
+  const patchStages = [...patch.matchAll(/\{\s*id:\s*(\w+),\s*role:\s*(\w+),\s*requires:/g)].map((m) => [m[1], m[2]])
+  if (patchStages.length !== 4) problems.push(`cordis.patch.yml declares ${patchStages.length} workflow stages, expected 4`)
+  for (const [stage, role] of patchStages) {
+    const documented = new RegExp(`${stage}\\s*(/|→|->)\\s*${role}|${role}\\s*(/|→|->)\\s*${stage}`).test(readme)
+    if (!documented) problems.push(`README does not document the stage mapping ${stage} -> ${role} that the shipped patch installs`)
+  }
+  if (!/kanbanSync:\s*true/.test(patch)) problems.push('cordis.patch.yml should enable kanbanSync so an installed bundle projects onto the Kanban board by default')
+  if (!/humanGate:\s*true/.test(patch)) problems.push('cordis.patch.yml must keep humanGate: true: no stage may be Done without a human decision')
+}
+
 if (problems.length) {
   console.error('manifest check failed:')
   for (const problem of problems) console.error(`  - ${problem}`)
