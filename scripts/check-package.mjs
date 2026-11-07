@@ -26,6 +26,19 @@ for (const file of ['index.js', 'role.js', 'client.js', 'cordis.patch.yml', 'ico
 for (const role of ['manager', 'designer', 'developer', 'tester', 'reviewer', 'researcher']) {
   require(existsSync(join(root, 'roles', `${role}.md`)), `missing role specification: roles/${role}.md`)
 }
+// A bundle patch is an overlay parsed as plain YAML: the cordis `!!js` tag only works in a profile
+// patch, and using one here makes `install_bundle` reject the package and roll the profile back.
+const patchText = readFileSync(join(root, 'cordis.patch.yml'), 'utf8')
+require(
+  !patchText.includes('!!js'),
+  'cordis.patch.yml must not contain a `!!js` tag: bundle overlays are parsed as plain YAML, so the install would be rejected',
+)
+const searchRows = (patchText.match(/@deepseek-ai\/dsh-tool-fs-search/g) ?? []).length
+const searchOptions = (patchText.match(/sampleOverCapGlobResults/g) ?? []).length
+require(
+  searchOptions >= searchRows,
+  `every dsh-tool-fs-search row needs the required sampleOverCapGlobResults option: ${searchRows} rows, ${searchOptions} options`,
+)
 for (const locale of ['en', 'zh']) {
   const path = join(root, 'locale', `${locale}.json`)
   if (!existsSync(path)) {

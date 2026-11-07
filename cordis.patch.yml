@@ -40,15 +40,10 @@
           - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
           - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
           - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } }
-          - id: tool-bash
-            name: '@deepseek-ai/dsh-tool-bash'
-            disabled: !!js process.platform === 'win32'
+          - { id: tool-bash, name: '@deepseek-ai/dsh-tool-bash' }
           - { id: tool-jobs, name: '@deepseek-ai/dsh-tool-jobs' }
           - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
-          - id: skill-filesystem
-            name: '@deepseek-ai/dsh-skill-filesystem'
-            config:
-              customSkillDirs: !!js [(process.env.HOME ?? process.cwd()) + '/shared/skills']
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
           - { id: tool-ask-user, name: '@deepseek-ai/dsh-tool-ask-user' }
           - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
           - { id: command-goal, name: '@deepseek-ai/dsh-command-goal' }
@@ -76,15 +71,10 @@
           - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
           - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
           - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } }
-          - id: tool-bash
-            name: '@deepseek-ai/dsh-tool-bash'
-            disabled: !!js process.platform === 'win32'
+          - { id: tool-bash, name: '@deepseek-ai/dsh-tool-bash' }
           - { id: tool-jobs, name: '@deepseek-ai/dsh-tool-jobs' }
           - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
-          - id: skill-filesystem
-            name: '@deepseek-ai/dsh-skill-filesystem'
-            config:
-              customSkillDirs: !!js [(process.env.HOME ?? process.cwd()) + '/shared/skills']
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
           - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
           - id: compaction
             name: cordis:group
@@ -110,10 +100,7 @@
           - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
           - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } }
           - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
-          - id: skill-filesystem
-            name: '@deepseek-ai/dsh-skill-filesystem'
-            config:
-              customSkillDirs: !!js [(process.env.HOME ?? process.cwd()) + '/shared/skills']
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
           - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
           - id: compaction
             name: cordis:group
@@ -138,15 +125,10 @@
           - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
           - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
           - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } }
-          - id: tool-bash
-            name: '@deepseek-ai/dsh-tool-bash'
-            disabled: !!js process.platform === 'win32'
+          - { id: tool-bash, name: '@deepseek-ai/dsh-tool-bash' }
           - { id: tool-jobs, name: '@deepseek-ai/dsh-tool-jobs' }
           - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
-          - id: skill-filesystem
-            name: '@deepseek-ai/dsh-skill-filesystem'
-            config:
-              customSkillDirs: !!js [(process.env.HOME ?? process.cwd()) + '/shared/skills']
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
           - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
           - id: compaction
             name: cordis:group
@@ -172,10 +154,7 @@
           - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
           - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } }
           - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
-          - id: skill-filesystem
-            name: '@deepseek-ai/dsh-skill-filesystem'
-            config:
-              customSkillDirs: !!js [(process.env.HOME ?? process.cwd()) + '/shared/skills']
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
           - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
           - id: compaction
             name: cordis:group
@@ -202,10 +181,7 @@
           - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search', config: { sampleOverCapGlobResults: false } }
           - { id: tool-web, name: '@deepseek-ai/dsh-tool-web' }
           - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
-          - id: skill-filesystem
-            name: '@deepseek-ai/dsh-skill-filesystem'
-            config:
-              customSkillDirs: !!js [(process.env.HOME ?? process.cwd()) + '/shared/skills']
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
           - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
           - id: compaction
             name: cordis:group
