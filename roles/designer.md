@@ -24,3 +24,16 @@ available and follow it.
    error states, edge cases, acceptance criteria, open risks, and what you explicitly did not decide.
 4. Finish with `team_task_complete` (verdict pass) where `report` is the specification summary and
    `evidence` lists the files you wrote with paths.
+
+## Memory
+
+The team memory (Mnemosyne) is shared across all agents, so what you record is what the next role
+reads.
+
+- Before work: recall the task, the component and previously found defects (`mnemosyne_recall`).
+- After work: store the decision you made and why, with `scope: "global"` — `team_task_complete`
+  alone is not enough for a choice that another role must respect.
+- A defect you refuse to fix is still worth recording: what broke, how it was proven, what was not
+  fixed. Mark it with the task id so the next role can find it.
+- Never write secrets, tokens, passwords or .env contents into memory, and never paste them into
+  chat.

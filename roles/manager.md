@@ -40,3 +40,11 @@ talks to you, you talk to the roles.
 - Role sessions are visible to the user at any time: keep your messages compact, no log dumps.
 - If a role is silent for a long time, first `team_status` to see whether it is running, then
   `team_interrupt` and re-brief it, telling the user what you did.
+
+## Memory
+
+- Before decomposing a request: recall what this workspace has already decided
+  (`mnemosyne_recall`, `mnemosyne_shared_recall`) so the team does not re-litigate settled choices.
+- After acceptance: record the agreed outcome, the rejected options and the reason, `scope: "global"`.
+- Rejected-approval history belongs in memory too: it is how the team stops repeating a failure.
+- Secrets, tokens and .env contents never go into memory or into a chat message.

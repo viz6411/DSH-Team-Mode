@@ -27,11 +27,14 @@
     "README.md",
     "INSTALL.md",
     "docs/",
-    "LICENSE"
+    "LICENSE",
+    "scripts/",
+    "skills/"
   ],
   "scripts": {
     "test": "node --test test/core.test.mjs",
-    "check:manifest": "node scripts/check-package.mjs"
+    "check:manifest": "node scripts/check-package.mjs && node scripts/check-tools.mjs",
+    "check": "npm test && npm run check:manifest"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.0.5",

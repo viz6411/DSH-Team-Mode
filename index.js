@@ -530,6 +530,47 @@ export function apply(ctx, config) {
       ctx.logger?.warn?.(`dsh-team-mode: client failure: ${payload?.message ?? 'unknown'}`)
       return { ok: true }
     },
+    /**
+     * Install self-check (A17): the preset roster the mode picker will actually offer, with the
+     * `broken` marker the picker filters on, plus the Team Mode state on disk. This is what an
+     * installer verifies after `install_bundle`, and what tells an agent why no role mode appears.
+     */
+    async diagnose() {
+      const presets = ctx.get('agentPresets')
+      const roster = await Promise.resolve(presets?.remoteExportList?.()).catch(() => null)
+      const inventory = await Promise.resolve(presets?.compositionInventory?.()).catch(() => null)
+      const listed = await Promise.resolve(presets?.list?.()).catch(() => null)
+      const source = roster ?? listed ?? inventory ?? []
+      const presetRows = (Array.isArray(source) ? source : []).map((item) => ({
+        id: item?.id ?? item?.presetId ?? null,
+        name: item?.name ?? null,
+        order: typeof item?.order === 'number' ? item.order : null,
+        broken: item?.broken ?? null,
+        description: typeof item?.description === 'string' ? item.description.slice(0, 120) : null,
+      }))
+      const fs = await fsPromises()
+      let workspaceFiles = []
+      let roleFiles = []
+      try {
+        workspaceFiles = await fs.readdir(join(teamModeHome(), 'workspaces'))
+      } catch {
+        /* no workspace has bound a Manager yet */
+      }
+      try {
+        roleFiles = await fs.readdir(config.rolesDir)
+      } catch {
+        /* no role overrides written yet */
+      }
+      return {
+        ok: true,
+        managerPresetIds: config.managerPresetIds,
+        teamPresets: presetRows.filter((row) => String(row.id ?? '').startsWith('team-')),
+        allPresets: presetRows,
+        spawnProviderRegistered: Boolean(ctx.subagents?.getProvider?.(config.spawnProvider)),
+        workspaceFiles,
+        userRoleFiles: roleFiles,
+      }
+    },
   }
 
   const service = {
