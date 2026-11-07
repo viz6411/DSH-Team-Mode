@@ -284,3 +284,19 @@ test('tool results are lossless JSON: undefined keys are removed, null and finit
   assert.deepEqual(value, { ok: false, note: 'no live Manager session', message: 'Delegation failed: no live Manager session' })
   assert.deepEqual(JSON.parse(JSON.stringify(value)), value)
 })
+
+test('a role profile keeps the parent session that started it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ws-parent-'))
+  const store = new WorkspaceStore({ info() {}, warn() {} })
+  store.dir = dir
+  const data = await store.load('ws-parent', dir)
+  board.touchProfile(data, 'developer', { sessionId: 'tm-dev', presetId: 'team-developer', personaHash: 'h1', parentSessionId: 'session-manager-1' })
+  board.touchProfile(data, 'developer', { sessionId: 'tm-dev', presetId: 'team-developer', personaHash: 'h1', parentSessionId: 'session-designer' })
+  board.touchProfile(data, 'tester', { sessionId: 'tm-test', presetId: 'team-tester', personaHash: 'h2', parentSessionId: 'session-developer' })
+  assert.equal(data.profiles.find((profile) => profile.role === 'developer').parentSessionId, 'session-manager-1')
+  assert.equal(data.profiles.find((profile) => profile.role === 'tester').parentSessionId, 'session-developer')
+  const saved = await store.load('ws-parent', dir)
+  assert.equal(saved.profiles.find((profile) => profile.role === 'tester').parentSessionId, 'session-developer')
+  assert.equal(saved.profiles.find((profile) => profile.role === 'developer').parentSessionId, 'session-manager-1')
+  rmSync(dir, { recursive: true, force: true })
+})

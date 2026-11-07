@@ -261,7 +261,7 @@ export function apply(ctx, config) {
           prompt: [{ type: 'text', text: openingPrompt(role, brief, spec) }],
         },
       })
-      const profile = board.touchProfile(data, role, { sessionId, presetId, personaHash: spec.hash })
+      const profile = board.touchProfile(data, role, { sessionId, presetId, personaHash: spec.hash, parentSessionId: managerAgent?.id ?? null })
       // The activation result is that run's eventual outcome; the profile session itself stays durable.
       Promise.resolve(activation?.result).catch(() => undefined)
       return { ok: true, profile, created: true }
@@ -286,11 +286,28 @@ export function apply(ctx, config) {
     const liveSender = senderAgent && ctx.agents.get(senderAgent.id) === senderAgent ? senderAgent : null
     const authority = managerAgent ?? liveSender
     if (!authority) return { ok: false, error: 'no live Manager session to authorize the hand-off' }
-    const profile = await ensureProfile({ data, role, managerAgent: authority, brief: `${task.subject}\n${task.brief}` })
-    if (!profile.ok) return profile
-    const delivered = await deliver(authority, profile.profile.sessionId, 'task', taskBrief(task, profile.created))
+    const brief = `${task.subject}\n${task.brief}`
+    let parent = authority
+    let profile = await ensureProfile({ data, role, managerAgent: authority, brief })
+    if (!profile.ok) {
+      // The child capacity is counted per parent session. When the Manager already holds its role
+      // sessions, the new profile hangs under the role that finished the previous stage instead: the
+      // chain keeps running, only the addressing of that one profile changes.
+      const limited = /limit/i.test(profile.error ?? '')
+      if (!limited || !liveSender || liveSender === authority) return profile
+      const retry = await ensureProfile({ data, role, managerAgent: liveSender, brief })
+      if (!retry.ok) return profile
+      parent = liveSender
+      profile = retry
+    }
+    const delivered = await deliver(parent, profile.profile.sessionId, 'task', taskBrief(task, profile.created))
     if (!delivered.ok) return { ok: false, error: `task ${task.id} is on the board, but delivery to "${role}" failed: ${delivered.error}` }
-    return { ok: true, profileSessionId: profile.profile.sessionId, created: profile.created }
+    return {
+      ok: true,
+      profileSessionId: profile.profile.sessionId,
+      created: profile.created,
+      handOffNote: parent === authority ? null : `role "${role}" was started under the "${parent.session?.header?.agentPreset ?? parent.id}" session because the Manager session reached its child capacity`,
+    }
   }
 
   const snapshot = async (workspaceId, workspacePath) => {
@@ -305,12 +322,16 @@ export function apply(ctx, config) {
     return view
   }
 
-  const interruptProfile = (profileSessionId, managerAgent, managerSessionId) => {
+  const interruptProfile = (profile, managerSessionId) => {
+    // A profile can always be interrupted from its own parent session address, even when the Manager
+    // that runs the workflow today is not that parent.
+    const parentSessionId = profile?.parentSessionId ?? managerSessionId
     try {
-      if (managerAgent && ctx.agents.get(managerAgent.id) === managerAgent) {
-        ctx.subagents.interrupt(profileSessionId, { kind: 'ancestor', agent: managerAgent })
+      const parentAgent = parentSessionId ? ctx.agents.get(parentSessionId) : null
+      if (parentAgent) {
+        ctx.subagents.interrupt(profile.sessionId, { kind: 'ancestor', agent: parentAgent })
       } else {
-        ctx.subagents.interrupt(profileSessionId, { kind: 'user', parentSessionId: managerSessionId })
+        ctx.subagents.interrupt(profile.sessionId, { kind: 'user', parentSessionId })
       }
       return { ok: true }
     } catch (error) {
@@ -379,7 +400,7 @@ export function apply(ctx, config) {
       const data = await dataOf(workspace.id, workspace.path)
       const profile = board.profileOf(data, role)
       if (!profile) return { ok: false, error: `role "${role}" has no profile in this workspace` }
-      return interruptProfile(profile.sessionId, agent, data.managerSessionId)
+      return interruptProfile(profile, data.managerSessionId)
     },
 
     async forward({ agent, role, text }) {
@@ -389,7 +410,12 @@ export function apply(ctx, config) {
       const profile = board.profileOf(data, role)
       if (!profile) return { ok: false, error: `role "${role}" has no profile in this workspace` }
       if (!roleOfAgent(profile, config.presetPrefix) && !(await roles.spec(role))) return { ok: false, error: `unknown role "${role}"` }
-      return deliver(agent, profile.sessionId, 'answer', text ?? '')
+      const delivered = await deliver(agent, profile.sessionId, 'answer', text ?? '')
+      if (!delivered.ok) {
+        const parent = profile.parentSessionId ?? data.managerSessionId ?? 'unknown'
+        return { ...delivered, note: `the "${role}" profile was started under session ${parent}; only that session, or the role itself, can message it directly` }
+      }
+      return delivered
     },
 
     async claim({ agent, taskId, expectedRevision }) {
@@ -503,7 +529,7 @@ export function apply(ctx, config) {
       const profile = (data.profiles ?? []).find((item) => item.sessionId === payload.sessionId || item.role === payload.role)
       if (!profile) return { ok: false, error: 'profile not found' }
       const managerAgent = data.managerSessionId ? ctx.agents.get(data.managerSessionId) : null
-      return interruptProfile(profile.sessionId, managerAgent, data.managerSessionId)
+      return interruptProfile(profile, data.managerSessionId)
     },
     async approve(payload) {
       const result = await store.mutate(payload.workspaceId, payload.path, async (data) => {
