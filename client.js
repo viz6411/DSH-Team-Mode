@@ -219,6 +219,19 @@ window.__ModuleLoader__.load({
       return data
     }
 
+    // Set by apply(): a render failure is reported to the Host, where the diagnostic file is the
+    // only place a browser-side failure can be read.
+    let panelFailure = () => undefined
+
+    function PanelGuard(props) {
+      try {
+        return h(TeamPage, props)
+      } catch (cause) {
+        panelFailure(`render: ${cause?.stack ?? cause}`)
+        return h('div', { className: 'team-root' }, h('p', { className: 'team-error', role: 'alert' }, `Team Mode: ${String(cause?.message ?? cause)}`))
+      }
+    }
+
     function TeamPage({ t, uiWorkspace }) {
       const [workspaces, setWorkspaces] = React.useState([])
       const [workspaceId, setWorkspaceId] = React.useState('')
@@ -608,6 +621,7 @@ window.__ModuleLoader__.load({
           }
         }
         report('ping', { detail: 'apply' })
+        panelFailure = (message) => report('clientError', { message })
 
         let translate = (key) => DICTS.en[key] ?? key
         try {
@@ -648,7 +662,7 @@ window.__ModuleLoader__.load({
             const slots = surface.slots ?? ctx.slots
             const disposeMain = slots.inject('main', () =>
               slots.register(
-                { name: 'main', key: 'team-mode', locale: NS, inject: () => ({ renderPanel: () => h(TeamPage, { t, uiWorkspace: ctx.uiWorkspace }) }) },
+                { name: 'main', key: 'team-mode', locale: NS, inject: () => ({ renderPanel: () => h(PanelGuard, { t, uiWorkspace: ctx.uiWorkspace }) }) },
                 (state) => h('div', { className: 'team-main-shell' }, state.renderPanel ? state.renderPanel() : null),
               ),
             )
