@@ -154,3 +154,15 @@ These are the reasons the mode appeared to "not work at all", in the order they 
    `journalctl --user -u dsh-web`, so `panel-signals.log` under `$DSH_HOME/team-mode/` is the channel
    the Client half writes failures into, and `POST /api/team-mode {"action":"diagnose"}` is readable
    from a shell with the same cookie the browser uses.
+
+7. **`store.mutate` hands back exactly what the callback returned.** A callback that returned
+   `{ data, result }` made every tool return the whole workspace object, and that object carries a
+   `log` function — which the Harness rejects as `INVALID_TOOL_OUTPUT: value is not lossless JSON`.
+   The board mutation had already happened, so the visible symptom was a role agent reporting itself
+   blocked after a *successful* stage completion. Callbacks now return the result directly, and
+   `scripts/check-tools.mjs` fails on the wrapper pattern.
+8. **`maxActiveSubagents` counts resident activations, not durable sessions.** A role profile that
+   finished its turn releases its slot, so a chain designer → developer → tester works even when the
+   cap is `1`; two roles that are *running at the same time* do not fit. `panel.probeHandOff` reports
+   the real reason for a refused hand-off, and `handOff` falls back to the previous role's session as
+   parent when the Manager session's capacity is full.

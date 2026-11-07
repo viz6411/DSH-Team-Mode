@@ -331,3 +331,28 @@ test('store.mutate returns exactly what its callback returns and persists the mu
   assert.equal(saved.profiles[0].parentSessionId, 'session-m')
   rmSync(dir, { recursive: true, force: true })
 })
+
+test('reconcileInterrupted only reopens tasks whose role session is not resident, once per revision', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ws-reconcile-'))
+  const store = new WorkspaceStore({ info() {}, warn() {} })
+  store.dir = dir
+  const data = await store.load('ws-reconcile', dir)
+  data.__workflow = WORKFLOW
+  data.__workflowConfig = WORKFLOW
+  board.touchProfile(data, 'designer', { sessionId: 'tm-designer', presetId: 'team-designer', personaHash: 'h' })
+  const created = board.createTask(data, WORKFLOW, { subject: 'A', brief: 'b', acceptance: 'a' })
+  assert.ok(created.ok)
+  board.claimTask(data, WORKFLOW, created.task.id, 'designer', 1)
+  const live = new Set(['tm-designer'])
+  const isLive = (sessionId) => live.has(sessionId)
+  assert.deepEqual(board.reconcileInterrupted(data, isLive), [], 'a live owner session is left alone')
+  live.clear()
+  const first = board.reconcileInterrupted(data, isLive)
+  assert.deepEqual(first, [created.task.id])
+  assert.equal(data.tasks[0].reports.at(-1).verdict, 'blocked', 'the reopened task carries a blocked report')
+  assert.deepEqual(board.reconcileInterrupted(data, isLive), [], 'the same revision is not reported twice')
+  const reClaimed = board.claimTask(data, WORKFLOW, created.task.id, 'designer', data.tasks[0].revision)
+  assert.ok(reClaimed.ok, reClaimed.error)
+  assert.deepEqual(board.reconcileInterrupted(data, isLive), [created.task.id], 'a new revision is reported again')
+  rmSync(dir, { recursive: true, force: true })
+})

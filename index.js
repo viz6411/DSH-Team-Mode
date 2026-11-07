@@ -335,6 +335,61 @@ export function apply(ctx, config) {
     return view
   }
 
+  /**
+   * A stage hand-off starts the next role profile, and the platform counts *resident* activations
+   * against `maxActiveSubagents` for the whole subagent tree. A role is resident while it calls
+   * `team_task_complete`, so at a low cap the next profile cannot start from inside that call. The
+   * board has already moved to the next stage; the Host waits until the completing role's turn is over
+   * and then repeats the same hand-off from the Manager session, which is free by then.
+   */
+  const deferredHandOffs = new Set()
+  let disposed = false
+  ctx.effect(() => () => { disposed = true }, 'teamMode.disposal')
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  const isCapacityRefused = (error) => /limit/i.test(String(error ?? ''))
+
+  const scheduleHandOffRetry = (workspace, taskId, completingRole) => {
+    if (!workspace?.id || !taskId || !completingRole || deferredHandOffs.has(taskId)) return { deferred: true }
+    deferredHandOffs.add(taskId)
+    void (async () => {
+      try {
+        for (let attempt = 0; attempt < 40 && !disposed; attempt += 1) {
+          await sleep(3000)
+          if (disposed) return
+          const data = await dataOf(workspace.id, workspace.path)
+          const task = board.findTask(data, taskId)
+          if (!task || task.status !== 'active' || !task.ownerRole) return
+          const completing = board.profileOf(data, completingRole)
+          if (completing && liveStatus(completing.sessionId) === 'running') continue
+          const outcome = await store.mutate(workspace.id, workspace.path, async (current) => {
+            current.__workflow = workflow
+            current.__workflowConfig = workflowConfig
+            const held = board.findTask(current, taskId)
+            if (!held || held.status !== 'active' || held.ownerRole !== task.ownerRole) return { ok: false, skipped: true }
+            return await handOff(current, held, null)
+          })
+          if (outcome?.ok) {
+            ctx.logger?.info?.(`dsh-team-mode: deferred hand-off of task ${taskId} to "${task.ownerRole}" completed`)
+            const fresh = await dataOf(workspace.id, workspace.path)
+            const mirrored = board.findTask(fresh, taskId)
+            const managerAgent = fresh.managerSessionId ? ctx.agents.get(fresh.managerSessionId) : null
+            if (mirrored && managerAgent) {
+              await mirrorComment(managerAgent, mirrored, { kind: 'hand-off', role: completingRole, text: `hand-off to "${task.ownerRole}" completed after the "${completingRole}" turn ended` })
+            }
+            return
+          }
+        }
+        ctx.logger?.warn?.(`dsh-team-mode: deferred hand-off of task ${taskId} gave up; the stage stays assigned until the Manager delegates again`)
+      } catch (error) {
+        ctx.logger?.warn?.(`dsh-team-mode: deferred hand-off of task ${taskId} failed: ${error?.message ?? error}`)
+      } finally {
+        deferredHandOffs.delete(taskId)
+      }
+    })()
+    return { deferred: true }
+  }
+
   const interruptProfile = (profile, managerSessionId) => {
     // A profile can always be interrupted from its own parent session address, even when the Manager
     // that runs the workflow today is not that parent.
@@ -464,7 +519,13 @@ export function apply(ctx, config) {
         if (!completed.ok) return completed
         const task = completed.task
         let hand = { ok: true }
-        if (task.ownerRole && task.ownerRole !== role) hand = await handOff(data, task, agent)
+        if (task.ownerRole && task.ownerRole !== role) {
+          hand = await handOff(data, task, agent)
+          if (!hand.ok && isCapacityRefused(hand.error)) {
+            scheduleHandOffRetry(workspace, task.id, role)
+            hand = { ok: true, note: `the "${task.ownerRole}" profile could not start while this turn was still resident; the Host retries the hand-off when this role's turn ends` }
+          }
+        }
         if (task.status === 'awaiting_approval') {
           const managerId = data.managerSessionId
           const managerAgent = managerId ? ctx.agents.get(managerId) : null
@@ -560,7 +621,11 @@ export function apply(ctx, config) {
       const result = await store.mutate(payload.workspaceId, payload.path, async (data) => {
         const rejected = board.rejectApproval(data, payload.taskId, payload.note, payload.stageId)
         if (!rejected.ok) return rejected
-        const hand = await handOff(data, rejected.task, null)
+        let hand = await handOff(data, rejected.task, null)
+        if (!hand.ok && isCapacityRefused(hand.error)) {
+          scheduleHandOffRetry({ id: payload.workspaceId, path: payload.path }, rejected.task.id, 'reviewer')
+          hand = { ok: true, note: `the "${rejected.task.ownerRole}" profile was refused while the board was busy; the Host retries the hand-off shortly` }
+        }
         return { ok: true, task: taskView(rejected.task), note: hand.ok ? null : hand.error }
       })
       return result
@@ -768,7 +833,15 @@ export function apply(ctx, config) {
           /* keep the cwd-derived id */
         }
       }
-      await store.mutate(id, path, (data) => board.bindManager(data, session.id))
+      await store.mutate(id, path, (data) => {
+        board.bindManager(data, session.id)
+        data.__workflow = workflow
+        data.__workflowConfig = workflowConfig
+        // A Manager chat reopening the workspace is the moment to surface tasks nobody is holding.
+        const reopened = board.reconcileInterrupted(data, (sessionId) => Boolean(ctx.agents.get(sessionId)))
+        if (reopened.length) ctx.logger?.info?.(`dsh-team-mode: ${reopened.length} task(s) need attention in workspace ${id}: ${reopened.join(', ')}`)
+        return reopened
+      })
     })().catch((error) => ctx.logger?.warn?.(`dsh-team-mode: manager binding failed: ${error?.message ?? error}`))
   })
 

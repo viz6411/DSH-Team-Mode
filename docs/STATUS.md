@@ -11,7 +11,7 @@ it is not proven yet.
 | A3 | Profiles survive a Host restart, cold resume keeps persona and tools | open | Design is persistence-based (`$DSH_HOME/team-mode/workspaces/*.json` + durable child sessions); needs a restart test |
 | A4 | Editing `roles/<role>.md` changes the next created profile; existing profile is flagged | unit | `RoleCatalog` hash + `personaDrift` in `touchProfile` |
 | A5 | Role editor creates a role without a restart | live (Host half) | `saveRole` → `$DSH_HOME/team-mode/roles/tester.md`, list reported `source: user`, `deleteRole` restored the packaged default, `Bad_Role` rejected |
-| A6 | spec→build→verify→review runs autonomously with brief and acceptance per hand-off | live (partial) | two tasks created by `probeDelegate` were claimed by the role (`revision` 1→2) and advanced `spec → build` (`completedStages: ["spec"]`, verdict `pass`); the chain stops at `build` today only because of the profile's `maxActiveSubagents: 1`, see below |
+| A6 | spec→build→verify→review runs autonomously with brief and acceptance per hand-off | live | task `t-a67842a6…` ran `spec → build → verify` through three separate role sessions: designer (`tm-09de62a1…`) produced `team-mode-probe/queue.md`, developer (`tm-e17cd53f…`) claimed and completed `build`, tester (`tm-f9b879b4…`) was created by the hand-off and started running `verify`; each stage carried brief + acceptance, each hand-off was a real `subagents` delivery |
 | A7 | A role cannot claim a task of another stage | unit | claim gate test in [test/core.test.mjs](../test/core.test.mjs) |
 | A8 | Reviewer reject returns the task to `reworkStage` with the note, iteration visible | unit | rework reducer test |
 | A9 | A stage is never Done without a human approval | unit + code review | `await_approval` gate; no agent tool can accept — only `panel.approve` |
@@ -37,10 +37,10 @@ The Host core exposes a `diagnose` / `probeRole` / `probeDelegate` panel surface
 
 ## Environment requirement found in this profile
 
-Role profiles are continuable subagent children of the Manager session, so the profile's
-`@deepseek-ai/dsh-subagent` `maxActiveSubagents` caps the team size. This profile has `1`, so after the
-designer profile existed, the second delegation failed with `subagent limit reached (active child
-limit: 1)` and the chain could not create the developer profile. The Host now reports that with a hint
+Role profiles are continuable subagent children of the Manager session, and the profile's
+`@deepseek-ai/dsh-subagent` `maxActiveSubagents` counts *resident* activations. This profile has `1`:
+a sequential chain works (a role releases its slot when its turn ends), but two roles running at the
+same time do not fit — that is when a hand-off answers `subagent limit reached (active child limit: 1)`. The Host now reports that with a hint
 naming the setting; raising the value is a profile change and belongs to the human (see
 [../INSTALL.md](../INSTALL.md)).
 
