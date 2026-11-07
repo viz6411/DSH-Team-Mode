@@ -611,21 +611,13 @@ window.__ModuleLoader__.load({
 
         let translate = (key) => DICTS.en[key] ?? key
         try {
+          // Only the built-in locales get a dictionary, and no language is added to the shared
+          // catalog: adding a language changes what every other plugin's locale registration must
+          // cover, which is a cross-plugin side effect a panel plugin must not cause.
           ctx.locale.register(NS, { en: DICTS.en, zh: DICTS.zh })
         } catch (cause) {
           console.warn('dsh-team-mode: locale dictionary registration failed', cause)
           report('clientError', { message: `locale register: ${cause?.message ?? cause}` })
-        }
-        try {
-          ctx.locale.addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' })
-        } catch (cause) {
-          console.warn('dsh-team-mode: Russian language pack was already registered or refused', cause)
-        }
-        try {
-          ctx.locale.register(NS, 'ru', DICTS.ru)
-        } catch (cause) {
-          console.warn('dsh-team-mode: Russian dictionary registration failed', cause)
-          report('clientError', { message: `locale ru register: ${cause?.message ?? cause}` })
         }
         try {
           const bound = ctx.locale.bind(NS)
@@ -636,13 +628,18 @@ window.__ModuleLoader__.load({
         }
         const t = translate
 
-        ctx.effect(() => {
-          const tag = document.createElement('style')
-          tag.setAttribute('data-dsh-team-mode-style', '')
-          tag.textContent = STYLES
-          document.head.appendChild(tag)
-          return () => tag.remove()
-        }, 'team-mode.styles')
+        try {
+          ctx.effect(() => {
+            const tag = document.createElement('style')
+            tag.setAttribute('data-dsh-team-mode-style', '')
+            tag.textContent = STYLES
+            document.head.appendChild(tag)
+            return () => tag.remove()
+          }, 'team-mode.styles')
+        } catch (cause) {
+          console.warn('dsh-team-mode: style effect was not installed', cause)
+          report('clientError', { message: `styles: ${cause?.message ?? cause}` })
+        }
 
         try {
           // The `main` and `sidebar.panellist` cells belong to the layout domain: they are reached

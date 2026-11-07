@@ -104,3 +104,17 @@ the subagent UI in the Manager chat): Team Mode deliberately does not build its 
   `ctx.systemPrompt` / persona, `ctx.sessionProjections`-free JSON state, and the Client slot
   catalog (`main`, `sidebar.panellist`). Config is validated through a hand-written
   Standard-Schema-V1 object so the bundle needs no runtime dependency on DSH packages.
+
+## Rules learned from the first live install
+
+- The Client half mounts from `package.json` → `dsh.client`. A patch row pointing at `client.js`
+  fails the whole bundle on the Host: `ReferenceError: window is not defined`.
+- A Client half must not call `locale.addLanguage`. A language belongs to the *shared* catalog, and
+  adding one changes what every other plugin's locale registration must cover. In this harness the
+  call took down `dsh-group-chat` on the same page boot — one plugin's panel plugin broke another
+  plugin's UI. Register dictionaries for the built-in locales only.
+- Client bundles are served in concatenated groups. A Client half that throws at mount can take its
+  whole group with it, so every step of `apply` (locale, styles, slots) is isolated and failures are
+  reported to the Host through `/api/team-mode` (`ping`, `clientError`), which writes
+  `$DSH_HOME/team-mode/panel-signals.log`: the Host log is not journald here, so this is the only
+  remote diagnostic a panel plugin has.
