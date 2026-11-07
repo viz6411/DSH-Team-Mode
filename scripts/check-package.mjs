@@ -41,7 +41,7 @@ const client = readFileSync(join(root, 'client.js'), 'utf8')
 require(client.includes('window.__ModuleLoader__.load'), 'client.js must register a lazy Client factory')
 require(client.includes("id: '@viz/dsh-team-mode'"), 'the Client factory id must equal the package name')
 require(!/^\s*import\s/m.test(client), 'client.js must not use ESM imports (the browser module table provides react)')
-require(client.includes('ctx.slots.register'), 'client.js must register slots')
+require(client.includes('slots.register('), 'client.js must register slots')
 
 const host = readFileSync(join(root, 'index.js'), 'utf8')
 require(!client.includes('document.body.append'), 'client.js must not append a second application to the page')
