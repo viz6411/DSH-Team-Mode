@@ -57,9 +57,27 @@ export async function apply(ctx, config) {
   const spec = await ctx.teamMode.roles.spec(role)
   if (!spec) ctx.logger?.warn?.(`dsh-team-mode: role spec "${role}" not found; the preset runs with a placeholder identity`)
 
+  // `tools.restrict()` accepts only names the host registers *globally*: an unknown name or a
+  // preset-scope name is rejected, and a rejected restriction marks the whole preset broken, which
+  // silently removes it from the mode picker. The deny list is therefore filtered against the live
+  // tool registry, and a failed restriction degrades to a warning instead of breaking the role.
+  // Boundaries that the preset itself controls (for example the worker's direct question tool) are
+  // enforced by the preset YAML simply not mounting that tool.
   ctx.effect(() => {
-    const restriction = isManager ? { deny: MANAGER_DENY } : { deny: WORKER_DENY }
-    return ctx.tools.restrict(restriction)
+    const wanted = isManager ? MANAGER_DENY : WORKER_DENY
+    const known = new Set((ctx.tools.schemas?.() ?? []).map((schema) => schema?.name))
+    const deny = wanted.filter((toolName) => known.has(toolName))
+    const skipped = wanted.filter((toolName) => !known.has(toolName))
+    if (skipped.length) {
+      ctx.logger?.info?.(`dsh-team-mode: role "${role}" restriction skipped tools that are not global here: ${skipped.join(', ')}`)
+    }
+    if (!deny.length) return () => undefined
+    try {
+      return ctx.tools.restrict({ deny })
+    } catch (error) {
+      ctx.logger?.warn?.(`dsh-team-mode: role "${role}" tool restriction failed: ${error?.message ?? error}`)
+      return () => undefined
+    }
   }, `teamMode.role(${role}).restrict`)
 
   // Persona: prefer the bundled persona package, fall back to raw prompt sections when the

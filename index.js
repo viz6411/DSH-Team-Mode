@@ -62,6 +62,9 @@ export const Config = configSchema({
 
 const MAX_BODY = 1024 * 1024
 
+/** `FiberState` is a numeric const enum; the diagnostic names each row's mount state. */
+const FIBER_NAMES = ['PENDING', 'LOADING', 'ACTIVE', 'FAILED', 'DISPOSED', 'UNLOADING']
+
 function toWorkflowConfig(config) {
   return {
     stages: config.workflow.stages,
@@ -537,16 +540,19 @@ export function apply(ctx, config) {
      */
     async diagnose() {
       const presets = ctx.get('agentPresets')
-      const roster = await Promise.resolve(presets?.remoteExportList?.()).catch(() => null)
-      const inventory = await Promise.resolve(presets?.compositionInventory?.()).catch(() => null)
-      const listed = await Promise.resolve(presets?.list?.()).catch(() => null)
-      const source = roster ?? listed ?? inventory ?? []
-      const presetRows = (Array.isArray(source) ? source : []).map((item) => ({
-        id: item?.id ?? item?.presetId ?? null,
+      const roster = await Promise.resolve(presets?.remoteExportList?.()).catch((error) => ({ error: String(error?.message ?? error) }))
+      const inventory = await Promise.resolve(presets?.compositionInventory?.()).catch(() => [])
+      const rows = Array.isArray(roster?.presets) ? roster.presets : []
+      const compositions = (inventory ?? []).map((item) => ({
+        id: item?.id ?? null,
         name: item?.name ?? null,
-        order: typeof item?.order === 'number' ? item.order : null,
+        isDefault: item?.isDefault ?? null,
         broken: item?.broken ?? null,
-        description: typeof item?.description === 'string' ? item.description.slice(0, 120) : null,
+        rows: (item?.rows ?? []).map((row) => ({
+          module: row?.moduleName,
+          enabled: row?.enabled,
+          fiber: FIBER_NAMES[row?.fiberState] ?? row?.fiberState ?? null,
+        })),
       }))
       const fs = await fsPromises()
       let workspaceFiles = []
@@ -564,8 +570,14 @@ export function apply(ctx, config) {
       return {
         ok: true,
         managerPresetIds: config.managerPresetIds,
-        teamPresets: presetRows.filter((row) => String(row.id ?? '').startsWith('team-')),
-        allPresets: presetRows,
+        selectablePresets: rows.map((row) => ({
+          id: row?.id ?? null,
+          name: row?.name ?? null,
+          isDefault: row?.isDefault ?? false,
+          broken: row?.broken ?? null,
+        })),
+        teamCompositions: compositions.filter((row) => String(row.id ?? '').startsWith('team-')),
+        brokenCompositions: compositions.filter((row) => row.broken),
         spawnProviderRegistered: Boolean(ctx.subagents?.getProvider?.(config.spawnProvider)),
         workspaceFiles,
         userRoleFiles: roleFiles,
