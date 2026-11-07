@@ -164,6 +164,7 @@ window.__ModuleLoader__.load({
 
     const STYLES = `
 .team-root { color: var(--dsw-alias-label-primary, inherit); font: var(--dsw-font-xs-13, inherit); padding: 12px 14px 24px; max-width: 1100px; }
+.team-main-shell { display: block; min-height: 100%; }
 .team-root *, .team-root *::before, .team-root *::after { box-sizing: border-box; }
 .team-section { margin: 0 0 18px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.28)); border-radius: 10px; padding: 10px 12px; }
 .team-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 14px; }
@@ -649,10 +650,13 @@ window.__ModuleLoader__.load({
           const disposePanels = ctx.inject(['layout'], (surface) => {
             const slots = surface.slots ?? ctx.slots
             const disposeMain = slots.inject('main', () =>
-              slots.register({ name: 'main', key: 'team-mode' }, () => h(TeamPage, { t, uiWorkspace: ctx.uiWorkspace })),
+              slots.register(
+                { name: 'main', key: 'team-mode', locale: NS, inject: () => ({ renderPanel: () => h(TeamPage, { t, uiWorkspace: ctx.uiWorkspace }) }) },
+                (state) => h('div', { className: 'team-main-shell' }, state.renderPanel ? state.renderPanel() : null),
+              ),
             )
             const disposeIcon = slots.inject('sidebar.panellist', () =>
-              slots.register({ name: 'sidebar.panellist', id: 'team-mode', order: 16, label: () => t('panelTitle') }, (props) => h(TeamIcon, props)),
+              slots.register({ name: 'sidebar.panellist', id: 'team-mode', order: 16, label: () => t('panelTitle'), locale: NS }, (props) => h(TeamIcon, props)),
             )
             report('ping', { detail: 'slots registered' })
             return () => {
