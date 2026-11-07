@@ -572,6 +572,24 @@ export function apply(ctx, config) {
       return { ...outcome.result, elapsedMs: Date.now() - started }
     },
     /**
+     * Installer self-check (A6): bind a live session as the workspace Manager and run one real
+     * delegation through the same `tools.delegate` backend a Manager agent calls, so an installer can
+     * prove the board, profile reuse and delivery to the role session without driving a chat.
+     */
+    async probeDelegate(payload) {
+      const parentId = payload?.parentSessionId
+      const agent = parentId ? ctx.agents.get(parentId) : null
+      if (!agent) return { ok: false, error: `no live agent for session "${parentId}"` }
+      const outcome = await tools.delegate({
+        agent,
+        subject: payload?.subject ?? 'Team Mode installer probe',
+        brief: payload?.brief ?? 'Claim this task, do the smallest possible work, then finish it with team_task_complete verdict pass and the evidence you produced.',
+        acceptance: payload?.acceptance ?? 'The role reports what it did and how it verified it.',
+      })
+      await recordPanelSignal('probe-delegate', outcome?.ok ? 'ok' : outcome?.error ?? 'failed')
+      return outcome
+    },
+    /**
      * Install self-check (A17): the preset roster the mode picker will actually offer, with the
      * `broken` marker the picker filters on, plus the Team Mode state on disk. This is what an
      * installer verifies after `install_bundle`, and what tells an agent why no role mode appears.
