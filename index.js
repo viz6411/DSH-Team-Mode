@@ -534,6 +534,44 @@ export function apply(ctx, config) {
       return { ok: true }
     },
     /**
+     * Installer self-check (A2): start or reuse one role profile under a live session exactly the way
+     * a delegation does, and report what the platform actually created. `parentSessionId` must be a
+     * live root session of the workspace; the role child becomes its continuable subagent child, so
+     * the workspace keeps that profile after an installer ran this probe.
+     */
+    async probeRole(payload) {
+      const parentId = payload?.parentSessionId
+      const parent = parentId ? ctx.agents.get(parentId) : null
+      if (!parent) return { ok: false, error: `no live agent for session "${parentId}"` }
+      const role = payload?.role ?? 'designer'
+      const workspace = await workspaceOfAgent(parent)
+      if (!workspace) return { ok: false, error: 'the parent session has no workspace path' }
+      const started = Date.now()
+      const outcome = await store.mutate(workspace.id, workspace.path, async (data) => {
+        const ensured = await ensureProfile({
+          data,
+          role,
+          managerAgent: parent,
+          brief: payload?.brief ?? 'Installer probe: no task is assigned yet, only report the tools you can call.',
+        })
+        if (!ensured.ok) return { data, result: ensured }
+        return {
+          data,
+          result: {
+            ok: true,
+            created: ensured.created,
+            role,
+            workspaceId: workspace.id,
+            workspacePath: workspace.path,
+            profile: board.profileOf(data, role),
+            profiles: data.profiles ?? [],
+          },
+        }
+      })
+      await recordPanelSignal('probe-role', `${role} under ${parentId}: ${outcome?.result?.ok ? 'ok' : outcome?.result?.error ?? 'failed'}`)
+      return { ...outcome.result, elapsedMs: Date.now() - started }
+    },
+    /**
      * Install self-check (A17): the preset roster the mode picker will actually offer, with the
      * `broken` marker the picker filters on, plus the Team Mode state on disk. This is what an
      * installer verifies after `install_bundle`, and what tells an agent why no role mode appears.
@@ -570,6 +608,12 @@ export function apply(ctx, config) {
       return {
         ok: true,
         managerPresetIds: config.managerPresetIds,
+        liveAgents: (ctx.agents.list?.() ?? []).map((agent) => ({
+          id: agent?.id ?? null,
+          cwd: agent?.session?.header?.cwd ?? null,
+          agentPreset: agent?.session?.header?.agentPreset ?? null,
+          origin: agent?.session?.header?.origin ?? null,
+        })),
         selectablePresets: rows.map((row) => ({
           id: row?.id ?? null,
           name: row?.name ?? null,
