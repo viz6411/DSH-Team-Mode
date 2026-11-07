@@ -118,3 +118,39 @@ the subagent UI in the Manager chat): Team Mode deliberately does not build its 
   reported to the Host through `/api/team-mode` (`ping`, `clientError`), which writes
   `$DSH_HOME/team-mode/panel-signals.log`: the Host log is not journald here, so this is the only
   remote diagnostic a panel plugin has.
+
+## Rules learned from the first real install (round 3)
+
+These are the reasons the mode appeared to "not work at all", in the order they were found.
+
+1. **A preset with a `broken` marker is not offered in the mode picker.** The picker filters
+   `preset.broken === undefined` (`@deepseek-ai/dsh-client-ui-agent-preset`). So when a user says
+   "the new mode is not in the list", the first thing to read is the roster
+   (`agentPresets.remoteExportList()` → `{ presets: [{ id, name, isDefault, broken }] }`), not the
+   install log. `panel.diagnose` returns exactly this plus `compositionInventory()` rows with their
+   mount state.
+2. **`tools.restrict()` rejects a name it does not know, and that throws the preset into `broken`.**
+   Its contract says "Empty filters, unknown names, scope-local names, and reserved transport names
+   fail": it only accepts *globally registered* tools. A deny list naming `subagent`, `spawn_teammate`,
+   `ask_user_question` (preset-scope tools, or tools whose plugin is not installed) breaks every preset
+   that mounts the row. `role.js` now filters the deny list against `ctx.tools.schemas()` and degrades
+   to a warning. Boundaries that a preset controls itself are enforced by the preset YAML not mounting
+   the tool.
+3. **A bundle patch is parsed as plain YAML.** The cordis `!!js` tag works in a profile patch and is
+   rejected in `dsh.bundle.patch` (`unknown tag … yaml.org,2002:js`), and the install then rolls back
+   `package.json`, `pnpm-lock.yaml` and `node_modules`. Also, a plugin row can have a *required*
+   option: `@deepseek-ai/dsh-tool-fs-search` needs `sampleOverCapGlobResults`, and a missing one marks
+   the whole preset broken. `scripts/check-package.mjs` now fails on both patterns.
+4. **A tool result must be lossless JSON.** If the returned value carries a key whose value is
+   `undefined` (or `NaN`, `Infinity`, a `Date`, a function), the Harness rejects the call with
+   `ToolOutputError / INVALID_TOOL_OUTPUT: value is not lossless JSON`, and the agent sees a useless
+   message. Every team tool returns through `lib/json.js` `toolResult()`, which strips `undefined`
+   keys, maps non-finite numbers to `null`, turns dates into ISO strings and breaks cycles.
+5. **A continuable child can only be messaged by its direct parent or its child.** So all role profiles
+   are children of the *Manager session* (`handOff` prefers the live Manager as the parent), which is
+   what keeps `team_forward`, panel interrupt by parent address and a cold-resumed role working. The
+   completing role is only a fallback authority when the Manager is offline.
+6. **Diagnostics that actually work on this host.** The Host logger does not reach
+   `journalctl --user -u dsh-web`, so `panel-signals.log` under `$DSH_HOME/team-mode/` is the channel
+   the Client half writes failures into, and `POST /api/team-mode {"action":"diagnose"}` is readable
+   from a shell with the same cookie the browser uses.
