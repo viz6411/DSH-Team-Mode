@@ -160,31 +160,59 @@ export function apply(ctx, config) {
     }
   }
 
-  const mirrorCard = async (agent, workspace, task) => {
-    const created = await kanbanCall(agent, 'kanban_add_card', cardPayload(task))
+  /**
+   * Kanban tools live in agent compositions, so the mirror has to run as an agent that actually sees
+   * them: the caller first, then the Manager session, then any live role profile.
+   */
+  const mirrorCandidates = async (seedAgent, workspaceId) => {
+    const out = []
+    const seen = new Set()
+    const push = (agent) => {
+      if (!agent || seen.has(agent.id)) return
+      seen.add(agent.id)
+      out.push(agent)
+    }
+    push(seedAgent)
+    const data = await dataOf(workspaceId, undefined)
+    push(data.managerSessionId ? ctx.agents.get(data.managerSessionId) : null)
+    for (const profile of data.profiles ?? []) push(ctx.agents.get(profile.sessionId))
+    return out
+  }
+
+  const mirrorCard = async (workspace, task, seedAgent) => {
+    let created = null
+    let runner = null
+    for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
+      created = await kanbanCall(candidate, 'kanban_add_card', cardPayload(task))
+      if (created) { runner = candidate; break }
+    }
     if (!created) return null
     if (!created.ok) return { kanbanNote: `kanban mirror failed: ${created.error}` }
     const cardId = cardIdOf(created.value)
     if (!cardId) return { kanbanCardId: null }
     await store.mutate(workspace.id, workspace.path, (data) => board.setKanbanCardId(data, task.id, cardId))
-    await mirrorMove(agent, { ...task, kanbanCardId: cardId })
+    await mirrorMove(runner, { ...task, kanbanCardId: cardId })
     return { kanbanCardId: cardId }
   }
 
   /** Move the mirrored card to the column its current stage or status maps to. */
   const mirrorMove = async (agent, task) => {
-    if (!config.kanbanSync || !task?.kanbanCardId || !agent) return
+    if (!config.kanbanSync || !task?.kanbanCardId || !agent) return false
     const read = await kanbanCall(agent, 'kanban_get', {})
-    if (!read?.ok) return
+    if (!read?.ok) return false
     const move = movePayload(task, read.value?.board)
-    if (!move) return
-    await kanbanCall(agent, 'kanban_move_card', move)
+    if (!move) return false
+    const moved = await kanbanCall(agent, 'kanban_move_card', move)
+    return Boolean(moved?.ok)
   }
 
-  const mirrorComment = async (agent, task, event) => {
-    if (!task?.kanbanCardId) return
-    await mirrorMove(agent, task)
-    await kanbanCall(agent, 'kanban_add_comment', { id: task.kanbanCardId, content: transitionComment(task, event) })
+  const mirrorComment = async (workspace, task, event, seedAgent) => {
+    if (!workspace || !task?.kanbanCardId) return
+    for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
+      const moved = await mirrorMove(candidate, task)
+      const commented = await kanbanCall(candidate, 'kanban_add_comment', { id: task.kanbanCardId, content: transitionComment(task, event) })
+      if (commented) return moved
+    }
   }
 
   /** Diagnostic trail for the browser half: the Host log is not journald here, so keep it on disk. */
@@ -385,7 +413,7 @@ export function apply(ctx, config) {
             const mirrored = board.findTask(fresh, taskId)
             const managerAgent = fresh.managerSessionId ? ctx.agents.get(fresh.managerSessionId) : null
             if (mirrored && managerAgent) {
-              await mirrorComment(managerAgent, mirrored, { kind: 'hand-off', role: completingRole, text: `hand-off to "${task.ownerRole}" completed after the "${completingRole}" turn ended` })
+              await mirrorComment(workspace, mirrored, { kind: 'hand-off', role: completingRole, text: `hand-off to "${task.ownerRole}" completed after the "${completingRole}" turn ended` }, managerAgent)
             }
             return
           }
@@ -438,7 +466,7 @@ export function apply(ctx, config) {
         }
       })
       if (result?.task) {
-        const mirror = await mirrorCard(agent, workspace, result.task)
+        const mirror = await mirrorCard(workspace, result.task, agent)
         if (mirror) Object.assign(result, mirror)
       }
       return result
@@ -504,7 +532,7 @@ export function apply(ctx, config) {
         return board.claimTask(data, workflowConfig, taskId, role, expectedRevision)
       })
       if (!claimed.ok) return claimed
-      await mirrorComment(agent, claimed.task, { kind: 'claimed', role, text: `owner ${role}, revision ${claimed.task.revision}` })
+      await mirrorComment(workspace, claimed.task, { kind: 'claimed', role, text: `owner ${role}, revision ${claimed.task.revision}` }, agent)
       return { ok: true, task: taskView(claimed.task) }
     },
 
@@ -546,7 +574,7 @@ export function apply(ctx, config) {
         return { ok: hand.ok, task: taskView(task), action: completed.action, note: hand.error ?? null }
       })
       if (result?.task) {
-        await mirrorComment(agent, result.task, { kind: result.action ?? 'completed', role, text: result.note ?? '' })
+        await mirrorComment(workspace, result.task, { kind: result.action ?? 'completed', role, text: result.note ?? '' }, agent)
       }
       return result
     },
