@@ -1,0 +1,80 @@
+{
+  "name": "@viz/dsh-team-mode",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Team Mode for DeepSeek Harness: a persistent team of long-lived role agents (Manager + Developer/Tester/Reviewer/Designer/Researcher) driven by a declarative workflow, with per-workspace profiles, agent.md role specs, a Team panel in the Web UI and direct user access to every agent session.",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./role": "./role.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./roles/*": "./roles/*",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "role.js",
+    "client.js",
+    "lib/",
+    "roles/",
+    "locale/",
+    "cordis.patch.yml",
+    "icon.svg",
+    "README.md",
+    "INSTALL.md",
+    "docs/",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --test test/core.test.mjs",
+    "check:manifest": "node scripts/check-package.mjs"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "~4.0.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.2",
+    "@deepseek-ai/dsh-persona": "0.2.1-rc.2",
+    "@deepseek-ai/schemastery": "0.2.1-rc.2"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CHANGE_ME/dsh-team-mode.git"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "agent-team",
+    "team-mode",
+    "multi-agent"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-renderer",
+        "@deepseek-ai/dsh-client-ui-session",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ]
+    },
+    "compatibility": {
+      "dsh": "0.2.1-rc.2",
+      "dshReleases": {
+        "0.2.1-rc.2": "compatible"
+      },
+      "profiles": [
+        "web"
+      ]
+    }
+  }
+}

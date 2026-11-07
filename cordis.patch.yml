@@ -1,0 +1,197 @@
+# Team Mode bundle: persistent team of role agents for DeepSeek Harness.
+#
+# Layer order: @deepseek-ai/dsh-base -> this bundle -> profile cordis.patch.yml -> user --patch overrides.
+# The Host core row must be mounted before the role presets (loader resolves services by inject).
+# Role identity (agent.md) is loaded by the `@viz/dsh-team-mode/role` row inside each preset from
+#   $DSH_HOME/team-mode/roles/<role>.md  (user-editable, created on demand)
+# with fallback to the packaged roles/<role>.md defaults.
+
+- insert:
+    # ---- Host core: team registry, workspace board, profiles lifecycle, panel API ----
+    - id: team-mode
+      name: '@viz/dsh-team-mode'
+      config:
+        managerPresetIds: [team-manager]
+        spawnProvider: spawn
+        maxConcurrentWorkers: 3
+        maxProfiles: 8
+        maxTasks: 256
+        kanbanSync: false
+        workflow:
+          stages:
+            - { id: spec,   role: designer,  requires: [] }
+            - { id: build,  role: developer, requires: [spec] }
+            - { id: verify, role: tester,    requires: [build] }
+            - { id: review, role: reviewer,  requires: [verify] }
+          humanGate: true
+          reworkStage: build
+
+    # ---- Role presets (agent capability compositions) ----
+    - id: preset-team-manager
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: team-manager
+        name: "Team Manager"
+        order: 40
+        description: "Manager команды: собирает требования, декомпозирует задачи, раздаёт их ролям, ведёт workflow и приёмку."
+        plugins:
+          - { id: team-role-manager, name: '@viz/dsh-team-mode/role', config: { role: manager } }
+          - { id: agent-instructions, name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } }
+          - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
+          - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
+          - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search' }
+          - { id: tool-bash, name: '@deepseek-ai/dsh-tool-bash', disabled: '!!js process.platform === "win32"' }
+          - { id: tool-jobs, name: '@deepseek-ai/dsh-tool-jobs' }
+          - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
+          - { id: tool-ask-user, name: '@deepseek-ai/dsh-tool-ask-user' }
+          - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
+          - { id: command-goal, name: '@deepseek-ai/dsh-command-goal' }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - { id: compaction-basic, name: '@deepseek-ai/dsh-compaction-basic' }
+              - { id: command-compact, name: '@deepseek-ai/dsh-command-compact' }
+              - { id: tool-result-pruner, name: '@deepseek-ai/dsh-compaction-tool-result-pruner', config: { thresholdChars: 8192, headChars: 4096 } }
+
+    - id: preset-team-developer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: team-developer
+        name: "Team Developer"
+        order: 41
+        description: "Production-инженер команды: реализует утверждённые требования минимальным корректным изменением."
+        plugins:
+          - { id: team-role-developer, name: '@viz/dsh-team-mode/role', config: { role: developer } }
+          - { id: agent-instructions, name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } }
+          - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
+          - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
+          - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search' }
+          - { id: tool-bash, name: '@deepseek-ai/dsh-tool-bash', disabled: '!!js process.platform === "win32"' }
+          - { id: tool-jobs, name: '@deepseek-ai/dsh-tool-jobs' }
+          - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
+          - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - { id: compaction-basic, name: '@deepseek-ai/dsh-compaction-basic' }
+              - { id: tool-result-pruner, name: '@deepseek-ai/dsh-compaction-tool-result-pruner', config: { thresholdChars: 8192, headChars: 4096 } }
+
+    - id: preset-team-designer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: team-designer
+        name: "Team Designer"
+        order: 42
+        description: "UI/UX дизайнер команды: спецификации, потоки, прототипы. Production-код не пишет."
+        plugins:
+          - { id: team-role-designer, name: '@viz/dsh-team-mode/role', config: { role: designer } }
+          - { id: agent-instructions, name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } }
+          - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
+          - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
+          - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search' }
+          - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
+          - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - { id: compaction-basic, name: '@deepseek-ai/dsh-compaction-basic' }
+              - { id: tool-result-pruner, name: '@deepseek-ai/dsh-compaction-tool-result-pruner', config: { thresholdChars: 8192, headChars: 4096 } }
+
+    - id: preset-team-tester
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: team-tester
+        name: "Team Tester"
+        order: 43
+        description: "Независимый тест-инженер: тесты и поиск дефектов. Production-код не меняет."
+        plugins:
+          - { id: team-role-tester, name: '@viz/dsh-team-mode/role', config: { role: tester } }
+          - { id: agent-instructions, name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } }
+          - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
+          - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
+          - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search' }
+          - { id: tool-bash, name: '@deepseek-ai/dsh-tool-bash', disabled: '!!js process.platform === "win32"' }
+          - { id: tool-jobs, name: '@deepseek-ai/dsh-tool-jobs' }
+          - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
+          - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - { id: compaction-basic, name: '@deepseek-ai/dsh-compaction-basic' }
+              - { id: tool-result-pruner, name: '@deepseek-ai/dsh-compaction-tool-result-pruner', config: { thresholdChars: 8192, headChars: 4096 } }
+
+    - id: preset-team-reviewer
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: team-reviewer
+        name: "Team Reviewer"
+        order: 44
+        description: "Независимая проверка готовности к приёмке. Read-only."
+        plugins:
+          - { id: team-role-reviewer, name: '@viz/dsh-team-mode/role', config: { role: reviewer } }
+          - { id: agent-instructions, name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } }
+          - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
+          - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
+          - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search' }
+          - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
+          - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - { id: compaction-basic, name: '@deepseek-ai/dsh-compaction-basic' }
+              - { id: tool-result-pruner, name: '@deepseek-ai/dsh-compaction-tool-result-pruner', config: { thresholdChars: 8192, headChars: 4096 } }
+
+    - id: preset-team-researcher
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: team-researcher
+        name: "Team Researcher"
+        order: 45
+        description: "Исследователь команды: анализ кода, рынка, документации, сравнения решений."
+        plugins:
+          - { id: team-role-researcher, name: '@viz/dsh-team-mode/role', config: { role: researcher } }
+          - { id: agent-instructions, name: '@deepseek-ai/dsh-agent-instructions', config: { maxBytes: 65536 } }
+          - { id: time-context, name: '@deepseek-ai/dsh-time-context' }
+          - { id: tool-fs, name: '@deepseek-ai/dsh-tool-fs' }
+          - { id: tool-fs-search, name: '@deepseek-ai/dsh-tool-fs-search' }
+          - { id: tool-web, name: '@deepseek-ai/dsh-tool-web' }
+          - { id: tool-skill, name: '@deepseek-ai/dsh-tool-skill' }
+          - { id: skill-filesystem, name: '@deepseek-ai/dsh-skill-filesystem' }
+          - { id: tool-goal, name: '@deepseek-ai/dsh-tool-goal' }
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - { id: compaction-basic, name: '@deepseek-ai/dsh-compaction-basic' }
+              - { id: tool-result-pruner, name: '@deepseek-ai/dsh-compaction-tool-result-pruner', config: { thresholdChars: 8192, headChars: 4096 } }
+
+    # ---- Web UI: the Team panel Client half is mounted from package.json `dsh.client`,
+    # not from a Host patch row (a patch row would import client.js on the Host side). --

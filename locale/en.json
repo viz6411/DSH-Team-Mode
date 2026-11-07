@@ -1,0 +1,9 @@
+{
+  "meta": {
+    "title": "Team Mode",
+    "description": "A persistent team of long-lived role agents (Manager plus Developer, Tester, Reviewer, Designer, Researcher) driven by a declarative stage workflow, with per-workspace role profiles, editable agent.md role files and a Team panel in the Web UI."
+  },
+  "team-mode": {
+    "panelTitle": "Team"
+  }
+}

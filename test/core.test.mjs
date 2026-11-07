@@ -1,0 +1,213 @@
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { parseFrontmatter, serializeFrontmatter, newId } from '../lib/util.js'
+import { normalizeWorkflow, gateDelegate, gateClaim, gateComplete, gateConcurrency, activeWorkerCount } from '../lib/workflow.js'
+import { WorkspaceStore, emptyWorkspace } from '../lib/store.js'
+import * as board from '../lib/board.js'
+import { RoleCatalog } from '../lib/roles.js'
+
+const WORKFLOW = {
+  stages: [
+    { id: 'spec', role: 'designer', requires: [] },
+    { id: 'build', role: 'developer', requires: ['spec'] },
+    { id: 'verify', role: 'tester', requires: ['build'] },
+    { id: 'review', role: 'reviewer', requires: ['verify'] },
+  ],
+  accept: { by: 'manager', humanGate: true },
+  rework: { onReviewReject: 'build' },
+  limits: { maxConcurrentWorkers: 2 },
+}
+
+test('frontmatter round-trip keeps scalar and list fields', () => {
+  const text = '---\nid: developer\nname: Team Developer\ndeny: [ask_user_question, plugin_manager]\ntools:\n  - read\n  - edit\n---\n\nBody text.\n'
+  const { meta, body } = parseFrontmatter(text)
+  assert.equal(meta.id, 'developer')
+  assert.equal(meta.name, 'Team Developer')
+  assert.deepEqual(meta.deny, ['ask_user_question', 'plugin_manager'])
+  assert.deepEqual(meta.tools, ['read', 'edit'])
+  assert.equal(body.trim(), 'Body text.')
+  const again = parseFrontmatter(serializeFrontmatter(meta, body))
+  assert.deepEqual(again.meta.deny, meta.deny)
+  assert.equal(again.body.trim(), 'Body text.')
+})
+
+test('workflow normalisation and delegate gate', () => {
+  const workflow = normalizeWorkflow(WORKFLOW)
+  assert.deepEqual(workflow.order, ['spec', 'build', 'verify', 'review'])
+  assert.deepEqual(gateDelegate(workflow), { ok: true, stage: 'spec', role: 'designer' })
+  assert.equal(normalizeWorkflow({ stages: [] }).firstStageId, null)
+  assert.equal(gateDelegate(normalizeWorkflow({ stages: [] })).ok, false)
+})
+
+test('a full stage chain ends in human acceptance, not auto-accept', () => {
+  const workflow = normalizeWorkflow(WORKFLOW)
+  const data = emptyWorkspace('ws-1', '/tmp/ws-1')
+  data.__workflow = workflow
+  const created = board.createTask(data, WORKFLOW, { subject: 'Ship panel', brief: 'build it', acceptance: 'works' })
+  assert.equal(created.ok, true)
+  assert.equal(created.task.stage, 'spec')
+  assert.equal(created.task.ownerRole, 'designer')
+
+  for (const [role, next] of [['designer', 'build'], ['developer', 'verify'], ['tester', 'review']]) {
+    const claimed = board.claimTask(data, WORKFLOW, created.task.id, role, created.task.revision)
+    assert.equal(claimed.ok, true, `claim by ${role}`)
+    const completed = board.completeTask(data, WORKFLOW, created.task.id, role, { report: 'done', evidence: 'ls', expectedRevision: claimed.task.revision })
+    assert.equal(completed.ok, true)
+    assert.equal(completed.task.stage, next)
+    assert.equal(completed.task.ownerRole, workflow.stageById.get(next).role)
+  }
+
+  const claimed = board.claimTask(data, WORKFLOW, created.task.id, 'reviewer', created.task.revision)
+  const completed = board.completeTask(data, WORKFLOW, created.task.id, 'reviewer', { report: 'ready', verdict: 'pass', expectedRevision: claimed.task.revision })
+  assert.equal(completed.action, 'await_approval')
+  assert.equal(completed.task.status, 'awaiting_approval')
+  assert.equal(completed.task.ownerRole, null)
+
+  const approved = board.approveTask(data, created.task.id, 'looks good')
+  assert.equal(approved.ok, true)
+  assert.equal(approved.task.status, 'accepted')
+  assert.equal(approved.task.approvedBy, 'human')
+})
+
+test('stage ownership is enforced: a developer cannot claim the designer stage', () => {
+  const data = emptyWorkspace('ws-2')
+  const created = board.createTask(data, WORKFLOW, { subject: 'x' })
+  const claimed = board.claimTask(data, WORKFLOW, created.task.id, 'developer', created.task.revision)
+  assert.equal(claimed.ok, false)
+  assert.match(claimed.error, /belongs to role "designer"/)
+})
+
+test('revision conflicts are refused instead of silently overwriting', () => {
+  const data = emptyWorkspace('ws-3')
+  const created = board.createTask(data, WORKFLOW, { subject: 'x' })
+  const stale = board.claimTask(data, WORKFLOW, created.task.id, 'designer', created.task.revision + 5)
+  assert.equal(stale.ok, false)
+  assert.match(stale.error, /revision conflict/)
+})
+
+test('reviewer reject sends the task back to the configured rework stage', () => {
+  const workflow = normalizeWorkflow(WORKFLOW)
+  const data = emptyWorkspace('ws-4')
+  data.__workflow = workflow
+  const created = board.createTask(data, WORKFLOW, { subject: 'x' })
+  let revision = created.task.revision
+  for (const role of ['designer', 'developer', 'tester']) {
+    const claimed = board.claimTask(data, WORKFLOW, created.task.id, role, revision)
+    const completed = board.completeTask(data, WORKFLOW, created.task.id, role, { report: 'ok', expectedRevision: claimed.task.revision })
+    revision = completed.task.revision
+  }
+  const claimed = board.claimTask(data, WORKFLOW, created.task.id, 'reviewer', revision)
+  const rejected = board.completeTask(data, WORKFLOW, created.task.id, 'reviewer', { verdict: 'reject', report: 'two defects', expectedRevision: claimed.task.revision })
+  assert.equal(rejected.action, 'rework')
+  assert.equal(rejected.task.stage, 'build')
+  assert.equal(rejected.task.ownerRole, 'developer')
+  assert.equal(rejected.task.iterations, 1)
+  assert.equal(rejected.task.status, 'active')
+})
+
+test('concurrency counts busy roles, queues the extra task and promotes it when a role frees', () => {
+  const workflow = normalizeWorkflow(WORKFLOW)
+  const data = emptyWorkspace('ws-5')
+  data.__workflow = workflow
+  const now = new Date().toISOString()
+  // Two different roles already hold an active task: the limit of 2 busy roles is reached.
+  data.tasks = [
+    { id: 't-dev', subject: 'dev work', stage: 'build', ownerRole: 'developer', status: 'active', revision: 1, blockedBy: [], writeScopes: [], completedStages: [], reports: [], iterations: 0, createdAt: now, updatedAt: now },
+    { id: 't-test', subject: 'test work', stage: 'verify', ownerRole: 'tester', status: 'active', revision: 1, blockedBy: [], writeScopes: [], completedStages: [], reports: [], iterations: 0, createdAt: now, updatedAt: now },
+  ]
+  assert.equal(activeWorkerCount(data), 2)
+  assert.equal(gateConcurrency(workflow, data, 'reviewer').ok, false)
+  // A task for an already busy role is still accepted: that role's session runs its inbox serially.
+  assert.equal(gateConcurrency(workflow, data, 'developer').ok, true)
+
+  const created = board.createTask(data, WORKFLOW, { subject: 'needs a free role' })
+  assert.equal(created.task.status, 'queued')
+  assert.equal(created.task.ownerRole, null)
+  assert.equal(created.queued, true)
+
+  const developerTask = data.tasks.find((task) => task.id === 't-dev')
+  const completed = board.completeTask(data, WORKFLOW, 't-dev', 'developer', { report: 'ok', expectedRevision: developerTask.revision })
+  assert.equal(completed.ok, true)
+  const promoted = data.tasks.find((task) => task.id === created.task.id)
+  assert.equal(promoted.status, 'active')
+  assert.equal(promoted.ownerRole, 'designer')
+})
+
+test('human rejection of an approval returns the task to its last stage role', () => {
+  const data = emptyWorkspace('ws-6')
+  data.__workflow = normalizeWorkflow(WORKFLOW)
+  const created = board.createTask(data, WORKFLOW, { subject: 'x' })
+  let revision = created.task.revision
+  for (const role of ['designer', 'developer', 'tester', 'reviewer']) {
+    const claimed = board.claimTask(data, WORKFLOW, created.task.id, role, revision)
+    const completed = board.completeTask(data, WORKFLOW, created.task.id, role, { report: 'ok', expectedRevision: claimed.task.revision })
+    revision = completed.task.revision
+  }
+  assert.equal(created.task.status, 'awaiting_approval')
+  const rejected = board.rejectApproval(data, created.task.id, 'not acceptable', 'verify')
+  assert.equal(rejected.ok, true)
+  assert.equal(rejected.task.stage, 'verify')
+  assert.equal(rejected.task.ownerRole, 'tester')
+  assert.equal(rejected.task.status, 'active')
+})
+
+test('workspace store persists and reloads, and survives a corrupt file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-mode-test-'))
+  const store = new WorkspaceStore({ log() {} })
+  store.dir = dir
+  await store.mutate('ws-a', '/tmp/ws-a', (data) => {
+    board.bindManager(data, 'session-1')
+    board.createTask(data, WORKFLOW, { subject: 'persisted' })
+    return undefined
+  })
+  const reloaded = await store.load('ws-a', '/tmp/ws-a')
+  assert.equal(reloaded.managerSessionId, 'session-1')
+  assert.equal(reloaded.tasks.length, 1)
+  assert.equal(reloaded.tasks[0].subject, 'persisted')
+
+  const { writeFileSync } = await import('node:fs')
+  store.cache.clear()
+  writeFileSync(join(dir, 'ws-a.json'), '{ not json')
+  const recovered = await store.load('ws-a', '/tmp/ws-a')
+  assert.equal(recovered.managerSessionId, null)
+  assert.equal(recovered.tasks.length, 0)
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('role catalog merges the packaged default with a user override', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'team-mode-roles-'))
+  const packaged = new URL('../roles/', import.meta.url).pathname
+  const catalog = new RoleCatalog(dir, packaged)
+  const defaults = await catalog.list()
+  assert.ok(defaults.some((role) => role.id === 'manager'))
+  assert.ok(defaults.some((role) => role.id === 'tester'))
+  assert.equal(defaults.every((role) => role.source === 'package'), true)
+
+  const saved = await catalog.write('tester', { meta: { name: 'QA Engineer', description: 'strict' }, body: 'New behaviour.' })
+  assert.equal(saved.ok, true)
+  const spec = await catalog.spec('tester')
+  assert.equal(spec.source, 'user')
+  assert.equal(spec.name, 'QA Engineer')
+  assert.equal(spec.text, 'New behaviour.')
+
+  const custom = await catalog.write('docs-writer', { meta: { name: 'Docs' }, body: 'Write docs.' })
+  assert.equal(custom.ok, true)
+  assert.equal((await catalog.list()).some((role) => role.id === 'docs-writer'), true)
+
+  assert.equal((await catalog.write('Bad Id', { body: 'x' })).ok, false)
+  const removed = await catalog.remove('tester')
+  assert.equal(removed.ok, true)
+  assert.equal((await catalog.spec('tester')).source, 'package')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('ids are unique and prefixed', () => {
+  const a = newId('tm')
+  const b = newId('tm')
+  assert.match(a, /^tm-[0-9a-f-]{36}$/)
+  assert.notEqual(a, b)
+})
