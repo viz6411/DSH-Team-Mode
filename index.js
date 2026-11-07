@@ -138,8 +138,18 @@ export function apply(ctx, config) {
    * When the plugin is absent the call is skipped and Team Mode runs without it.
    */
   const kanbanCall = async (agent, toolName, args) => {
-    if (!config.kanbanSync || !agent) return null
-    if (!ctx.tools?.get?.(toolName, agent)) return null
+    if (!config.kanbanSync) {
+      await recordPanelSignal('kanban-skipped', `${toolName}: kanbanSync is off in this profile's teamMode config`)
+      return null
+    }
+    if (!agent) {
+      await recordPanelSignal('kanban-skipped', `${toolName}: no live agent to run the projection as`)
+      return null
+    }
+    if (!ctx.tools?.get?.(toolName, agent)) {
+      await recordPanelSignal('kanban-skipped', `${toolName}: not visible to agent ${agent.id} (preset ${agent.session?.header?.agentPreset ?? 'none'})`)
+      return null
+    }
     try {
       const result = await ctx.tools.execute({ callId: newId('call'), name: toolName, arguments: args, agent, signal: abortSignal() })
       if (result?.isError) return { ok: false, error: result?.error?.message ?? `${toolName} failed` }
