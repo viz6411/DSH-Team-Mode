@@ -166,3 +166,9 @@ These are the reasons the mode appeared to "not work at all", in the order they 
    cap is `1`; two roles that are *running at the same time* do not fit. `panel.probeHandOff` reports
    the real reason for a refused hand-off, and `handOff` falls back to the previous role's session as
    parent when the Manager session's capacity is full.
+9. **A hand-off that the platform refuses is deferred, not lost.** Because residency counts against the
+   child cap, a `team_task_complete` that needs a *new* role profile can be refused while the completing
+   role is still running. `tools.complete` then keeps the board on the next stage, tells the role why,
+   and the Host repeats the same hand-off from the Manager session once that role's turn ends
+   (`scheduleHandOffRetry`, bounded retries, cancelled when the plugin disposes). `panel.probeHandOff`
+   is the installer's way to run or repair one hand-off and read the platform's real answer.
