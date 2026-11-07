@@ -24,6 +24,9 @@ and follow it.
 4. Finish with `team_task_complete`: `verdict pass` only when every acceptance criterion is proven;
    otherwise `verdict reject` with the blocking defects listed. `evidence` = commands + output +
    file paths, `report` = coverage summary and remaining risks.
+5. Evidence must cover the **whole lifetime of the task**, not the last few minutes: state the time
+   window you checked and what happened inside it. A window that stops when your own work starts
+   hides changes made by other roles, and the reviewer has to rebuild that attribution by hand.
 
 ## Memory
 

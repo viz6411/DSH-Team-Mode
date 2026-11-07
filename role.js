@@ -207,7 +207,7 @@ export async function apply(ctx, config) {
     output: okText('Task claimed.'),
     async execute(args, exec) {
       const result = await ctx.teamMode.tools.claim({ agent: exec.agent, taskId: args.taskId, expectedRevision: args.expectedRevision })
-      return toolResult(result, message(result, result.ok ? `Claimed ${args.taskId}.` : `Claim failed: ${result.error ?? result.note}`))
+      return toolResult(result, message(result, result.ok ? `Claimed ${args.taskId} at revision ${result.task?.revision}; complete it with expectedRevision ${result.task?.revision}.` : `Claim failed: ${result.error ?? result.note}`))
     },
   }))
 
@@ -286,5 +286,6 @@ function workerSuffix(role) {
     'Finish each stage with team_task_complete including evidence (commands, files, test output); use verdict reject only when the previous stage’s output is genuinely unusable.',
     'Questions and blockers go to the Manager through team_report — never to the user directly.',
     'If the user writes to you directly, answer them, then notify the Manager with team_report(kind=note) about anything that changes the task.',
+    'team_task_claim answers with the revision the task has now: complete the stage with that exact expectedRevision (or omit it). A stale revision is refused, the work already done stays on the board, and team_tasks is the cheapest way to read the current one.',
   ].join('\n')
 }

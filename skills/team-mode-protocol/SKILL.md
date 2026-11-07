@@ -56,3 +56,9 @@ Chat messages between roles stay one line: role, task id, criterion.
 
 The team memory (Mnemosyne) is shared. Recall before a task, record the decision after it, always
 with `scope: "global"`. Secrets, tokens and `.env` contents never enter memory or chat.
+
+## Evidence windows
+
+Evidence a role records must cover the **whole lifetime of the task**, not just the minutes around its
+own work: name the window you checked and what changed inside it. A window that stops when your stage
+starts hides what other roles edited, and the reviewer has to rebuild that attribution from git history.
