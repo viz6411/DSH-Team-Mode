@@ -131,7 +131,15 @@ export async function apply(ctx, config) {
           blockedBy: args.blockedBy ?? [],
           writeScopes: args.writeScopes ?? [],
         })
-        return toolResult(result, message(result, result.ok ? `Task ${result.task?.id} delegated to ${result.task?.ownerRole}.` : `Delegation failed: ${result.error ?? result.note}`))
+        return toolResult(
+          result,
+          message(
+            result,
+            result.ok
+              ? `Task ${result.task?.id} delegated to ${result.task?.ownerRole}.${result.handOffFailed ? ` Warning: ${result.note}` : ''}`
+              : `Delegation failed: ${result.error ?? result.note}`,
+          ),
+        )
       },
     }))
 
@@ -232,7 +240,15 @@ export async function apply(ctx, config) {
         evidence: args.evidence ?? '',
         expectedRevision: args.expectedRevision,
       })
-      return toolResult(result, message(result, result.ok ? `Task ${args.taskId}: ${result.action}.` : `Completion rejected: ${result.error ?? result.note}`))
+      return toolResult(
+        result,
+        message(
+          result,
+          result.ok
+            ? `Task ${args.taskId}: ${result.action}.${result.handOffFailed ? ` Warning: ${result.note} Do not complete this task again, the stage is already closed.` : ''}`
+            : `Completion rejected: ${result.error ?? result.note}`,
+        ),
+      )
     },
   }))
 

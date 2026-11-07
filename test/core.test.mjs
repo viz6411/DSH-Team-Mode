@@ -9,7 +9,7 @@ import { normalizeWorkflow, gateDelegate, gateClaim, gateComplete, gateConcurren
 import { WorkspaceStore, emptyWorkspace } from '../lib/store.js'
 import * as board from '../lib/board.js'
 import { RoleCatalog } from '../lib/roles.js'
-import { cardPayload, transitionComment, cardIdOf } from '../lib/kanban.js'
+import { cardPayload, transitionComment, cardIdOf, cardTitle, toolFailure, hasLabel } from '../lib/kanban.js'
 
 const WORKFLOW = {
   stages: [
@@ -355,4 +355,21 @@ test('reconcileInterrupted only reopens tasks whose role session is not resident
   assert.ok(reClaimed.ok, reClaimed.error)
   assert.deepEqual(board.reconcileInterrupted(data, isLive), [created.task.id], 'a new revision is reported again')
   rmSync(dir, { recursive: true, force: true })
+})
+
+test('the Kanban mirror treats a tool-level refusal as a failure', () => {
+  assert.equal(toolFailure({ ok: false, message: 'Label not found: team-mode' }), 'Label not found: team-mode')
+  assert.equal(toolFailure({ ok: false }), 'the Kanban tool refused the call')
+  assert.equal(toolFailure({ ok: true, board: { cards: [] } }), null)
+  assert.equal(hasLabel({ labels: [{ name: 'team-mode' }] }, 'team-mode'), true)
+  assert.equal(hasLabel({ board: { labels: ['bug'] } }, 'team-mode'), false)
+})
+
+test('the mirrored card id is recovered from the board answer by its title', () => {
+  const title = cardTitle({ id: 't-1', subject: 'Mirror' })
+  // The Kanban tool answers with the whole board, not with the card it created.
+  const value = { ok: true, message: 'Card added', board: { cards: [{ id: 'k930', title: 'unrelated' }, { id: 'k931', title }] } }
+  assert.equal(cardIdOf(value, title), 'k931')
+  assert.equal(cardIdOf({ ok: true, card: { id: 'k7' } }, title), 'k7')
+  assert.equal(cardIdOf(value, '[TM missing] subject'), null)
 })

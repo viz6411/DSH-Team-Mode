@@ -81,6 +81,31 @@ for (const action of panelActions) {
   require(hostPanel.has(action), `Client half calls panel action "${action}", which the Host core does not implement`)
 }
 
+
+// A helper called from the Host core must be imported there. `cardTitle(task)` with no name in the
+// import list is a ReferenceError inside the Kanban mirror, and the mirror reports it as a missing card.
+for (const file of ['lib/kanban.js', 'lib/board.js']) {
+  const source = read(file)
+  const importLines = host.split('\n').filter((line) => line.startsWith('import ') && line.includes(`'./${file}'`))
+  if (!importLines.length) continue
+  const importedAsNamespace = importLines.some((line) => /import \* as \w+ from/.test(line))
+  if (importedAsNamespace) continue
+  const imported = new Set()
+  for (const line of importLines) {
+    const inner = (line.match(/{([^}]*)}/) || [])[1] ?? ''
+    for (const entry of inner.split(',')) {
+      const name = entry.split(/\s+as\s+/)[0].trim()
+      if (name) imported.add(name)
+    }
+  }
+  for (const match of source.matchAll(/export (?:async )?function (\w+)/g)) {
+    const name = match[1]
+    if (new RegExp(`(?<![.\\w])${name}\\(`).test(host) && !imported.has(name)) {
+      failures.push(`index.js calls ${name} exported by ${file} but does not import it`)
+    }
+  }
+}
+
 if (failures.length) {
   console.error('tool and panel wiring check failed:')
   for (const failure of failures) console.error(`  - ${failure}`)

@@ -18,7 +18,7 @@ import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
 import { boardView } from './lib/board.js'
-import { cardPayload, transitionComment, cardIdOf, movePayload } from './lib/kanban.js'
+import { cardTitle, cardPayload, transitionComment, cardIdOf, movePayload, toolFailure as kanbanToolFailure, hasLabel as kanbanHasLabel } from './lib/kanban.js'
 import { RoleCatalog } from './lib/roles.js'
 import { normalizeWorkflow, activeWorkerCount } from './lib/workflow.js'
 
@@ -152,7 +152,16 @@ export function apply(ctx, config) {
     }
     try {
       const result = await ctx.tools.execute({ callId: newId('call'), name: toolName, arguments: args, agent, signal: abortSignal() })
-      if (result?.isError) return { ok: false, error: result?.error?.message ?? `${toolName} failed` }
+      if (result?.isError) {
+        const error = result?.error?.message ?? `${toolName} failed`
+        await recordPanelSignal('kanban-error', `${toolName}: ${error}`)
+        return { ok: false, error }
+      }
+      const refusal = kanbanToolFailure(result?.value)
+      if (refusal) {
+        await recordPanelSignal('kanban-refused', `${toolName}: ${refusal}`)
+        return { ok: false, error: refusal }
+      }
       return { ok: true, value: result?.value }
     } catch (error) {
       ctx.logger?.warn?.(`dsh-team-mode: kanban projection "${toolName}" failed: ${error?.message ?? error}`)
@@ -179,17 +188,50 @@ export function apply(ctx, config) {
     return out
   }
 
+  let kanbanLabelReady = false
+  /**
+   * Card creation fails when the label the mirror tags its cards with does not exist on the board, so the
+   * mirror creates that label once and falls back to an unlabelled card when the board refuses it.
+   */
+  const ensureKanbanLabel = async (agent) => {
+    if (kanbanLabelReady) return true
+    const read = await kanbanCall(agent, 'kanban_get_label', {})
+    if (read?.ok && kanbanHasLabel(read.value, CARD_LABEL)) {
+      kanbanLabelReady = true
+      return true
+    }
+    const added = await kanbanCall(agent, 'kanban_add_label', { name: CARD_LABEL, color: '#7c5cff' })
+    kanbanLabelReady = Boolean(added?.ok)
+    return kanbanLabelReady
+  }
+
   const mirrorCard = async (workspace, task, seedAgent) => {
+    const title = cardTitle(task)
     let created = null
     let runner = null
+    let lastError = null
     for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
-      created = await kanbanCall(candidate, 'kanban_add_card', cardPayload(task))
-      if (created) { runner = candidate; break }
+      const payload = cardPayload(task)
+      if (!(await ensureKanbanLabel(candidate))) delete payload.label
+      created = await kanbanCall(candidate, 'kanban_add_card', payload)
+      if (created?.ok) { runner = candidate; break }
+      lastError = created?.error ?? lastError
+      created = null
     }
-    if (!created) return null
-    if (!created.ok) return { kanbanNote: `kanban mirror failed: ${created.error}` }
-    const cardId = cardIdOf(created.value)
-    if (!cardId) return { kanbanCardId: null }
+    if (!created) {
+      const note = `kanban mirror failed: ${lastError ?? 'no agent could run the projection'}`
+      await recordPanelSignal('kanban-mirror-failed', `task ${task.id}: ${note}`)
+      return { kanbanNote: note }
+    }
+    let cardId = cardIdOf(created.value, title)
+    if (!cardId) {
+      const read = await kanbanCall(runner, 'kanban_get', {})
+      cardId = read?.ok ? cardIdOf(read.value, title) : null
+    }
+    if (!cardId) {
+      await recordPanelSignal('kanban-card-id-missing', `task ${task.id}: the card titled "${title}" was added but its id could not be read`)
+      return { kanbanNote: 'the Kanban card was added but its id could not be read, so later transitions are not mirrored' }
+    }
     await store.mutate(workspace.id, workspace.path, (data) => board.setKanbanCardId(data, task.id, cardId))
     await mirrorMove(runner, { ...task, kanbanCardId: cardId })
     return { kanbanCardId: cardId }
@@ -458,11 +500,12 @@ export function apply(ctx, config) {
         let hand = { ok: true }
         if (task.status === 'active') hand = await handOff(data, task, agent)
         return {
-          ok: hand.ok,
+          ok: true,
           task: taskView(task),
           queued: created.queued ?? false,
+          handOffFailed: !hand.ok,
           queueReason: created.queueReason ?? null,
-          note: bound.note ?? hand.error ?? null,
+          note: bound.note ?? (hand.error ? `the task was created, but its first stage could not start: ${hand.error}` : null),
         }
       })
       if (result?.task) {
@@ -571,7 +614,13 @@ export function apply(ctx, config) {
             await deliver(agent, managerId, 'awaiting-approval', `Task ${task.id} "${task.subject}" finished every stage and needs human acceptance in the Team panel.`)
           }
         }
-        return { ok: hand.ok, task: taskView(task), action: completed.action, note: hand.error ?? null }
+        return {
+          ok: true,
+          task: taskView(task),
+          action: completed.action,
+          handOffFailed: !hand.ok,
+          note: hand.error ? `the stage was completed, but the next role could not be started: ${hand.error}` : null,
+        }
       })
       if (result?.task) {
         await mirrorComment(workspace, result.task, { kind: result.action ?? 'completed', role, text: result.note ?? '' }, agent)
