@@ -592,11 +592,32 @@ window.__ModuleLoader__.load({
     return {
       inject: ['slots', 'locale', 'uiWorkspace'],
       apply(ctx) {
-        ctx.effect(() => ctx.locale.register(NS, 'en', DICTS.en), 'team-mode.locale.en')
-        ctx.effect(() => ctx.locale.register(NS, 'zh', DICTS.zh), 'team-mode.locale.zh')
-        ctx.effect(() => ctx.locale.addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' }), 'team-mode.locale.ru.language')
-        ctx.effect(() => ctx.locale.register(NS, 'ru', DICTS.ru), 'team-mode.locale.ru.dictionary')
-        const t = ctx.locale.bind(NS)
+        // Localized copy: the built-in locales register as one complete dictionary, the added
+        // Russian pack registers its own namespace dictionary. A locale failure must not stop the
+        // panel from mounting, so each step is isolated and reported to the console.
+        let translate = (key) => DICTS.en[key] ?? key
+        try {
+          ctx.locale.register(NS, { en: DICTS.en, zh: DICTS.zh })
+        } catch (cause) {
+          console.warn('dsh-team-mode: locale dictionary registration failed', cause)
+        }
+        try {
+          ctx.locale.addLanguage({ id: 'ru', label: 'Русский', fallback: 'en' })
+        } catch (cause) {
+          console.warn('dsh-team-mode: Russian language pack was already registered or refused', cause)
+        }
+        try {
+          ctx.locale.register(NS, 'ru', DICTS.ru)
+        } catch (cause) {
+          console.warn('dsh-team-mode: Russian dictionary registration failed', cause)
+        }
+        try {
+          const bound = ctx.locale.bind(NS)
+          if (typeof bound === 'function') translate = (key) => bound(key) || DICTS.en[key] || key
+        } catch (cause) {
+          console.warn('dsh-team-mode: locale bind failed', cause)
+        }
+        const t = translate
 
         ctx.effect(() => {
           const tag = document.createElement('style')
