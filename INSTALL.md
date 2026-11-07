@@ -35,6 +35,23 @@ From npm, once published:
   from the DSH installation and are declared only as dev dependencies.
 - No account, no network services, no extra daemons. State lives under `$DSH_HOME/team-mode/`.
 
+## Profile settings Team Mode depends on
+
+Role profiles are continuable subagent children of the Manager session, so the profile's
+`@deepseek-ai/dsh-subagent` config caps how many role sessions can exist at once:
+
+```yaml
+- id: subagent
+  name: '@deepseek-ai/dsh-subagent'
+  config:
+    maxActiveSubagents: 6
+```
+
+With `maxActiveSubagents: 1` (a common default) only one role profile can be created: the second
+delegation fails with `subagent limit reached (active child limit: 1)`, and the workflow stops after
+the first stage. Set it to at least the number of roles the team runs side by side, matching
+`teamMode.maxConcurrentWorkers`. This row belongs to the profile patch, so the human applies it.
+
 ## Verify after install
 
 ```

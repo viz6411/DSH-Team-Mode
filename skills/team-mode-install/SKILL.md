@@ -31,6 +31,11 @@ Steps the agent then performs:
    - `listConfigs` with `input: {name:"@deepseek-ai/dsh-agent-preset"}` → `preset-team-manager`,
      `preset-team-developer`, `preset-team-designer`, `preset-team-tester`, `preset-team-reviewer`,
      `preset-team-researcher`.
+5. **Check the child cap the profile allows.** Role profiles are continuable subagent children of the
+   Manager session, so `@deepseek-ai/dsh-subagent`'s `maxActiveSubagents` in the profile patch decides
+   how many roles can exist at once. If it is `1`, the second delegation fails with
+   `subagent limit reached (active child limit: 1)` and the workflow stops after the first stage — tell
+   the human to raise it to at least `teamMode.maxConcurrentWorkers` (the profile patch is theirs).
 5. **Verify the Client half.** The bundle row for `client.js` is *not* a patch row — the Web client
    loads it from `package.json` → `dsh.client`. A page reload is required: profile-installed client
    bundles are not hot-reloaded.

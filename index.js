@@ -266,7 +266,12 @@ export function apply(ctx, config) {
       Promise.resolve(activation?.result).catch(() => undefined)
       return { ok: true, profile, created: true }
     } catch (error) {
-      return { ok: false, error: `failed to start role profile "${role}": ${error?.message ?? String(error)}` }
+      const reason = error?.message ?? String(error)
+      const limited = /limit/i.test(reason) || error?.name === 'SubagentLimitsExceeded'
+      const hint = limited
+        ? ` the profile's @deepseek-ai/dsh-subagent config caps active children (maxActiveSubagents), and a Team Mode workspace needs at least as many as the roles it runs at once (this plugin plans for ${config.maxConcurrentWorkers}).`
+        : ''
+      return { ok: false, error: `failed to start role profile "${role}": ${reason}${hint}` }
     }
   }
 
