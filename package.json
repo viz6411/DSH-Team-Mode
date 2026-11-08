@@ -45,7 +45,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CHANGE_ME/dsh-team-mode.git"
+    "url": "git+https://github.com/viz6411/DSH-Team-Mode.git"
   },
   "keywords": [
     "deepseek-harness",
