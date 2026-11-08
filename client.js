@@ -154,7 +154,10 @@ window.__ModuleLoader__.load({
     }
 
     const STYLES = `
-.team-root { color: var(--dsw-alias-label-primary, inherit); font: var(--dsw-font-xs-13, inherit); padding: 12px 14px 24px; max-width: 1100px; }
+.team-root { color: var(--dsw-alias-label-primary, inherit); font: var(--dsw-font-xs-13, inherit); padding: 12px 14px 24px; max-width: 1100px; height: 100%; overflow: auto; overscroll-behavior: contain; }
+.team-root textarea { max-height: 46vh; }
+.team-root details { margin: 0 0 18px; }
+.team-root details > summary { cursor: pointer; font-weight: 600; }
 .team-main-shell { display: block; min-height: 100%; }
 .team-root *, .team-root *::before, .team-root *::after { box-sizing: border-box; }
 .team-section { margin: 0 0 18px; border: 1px solid var(--dsw-alias-border-secondary, rgba(128,128,128,.28)); border-radius: 10px; padding: 10px 12px; }
