@@ -112,9 +112,12 @@ applies to profiles created after the change, and recreating a live profile is y
 ## Limits and honesty
 
 
-- The Kanban mirror (`kanbanSync`) is a one-way projection: card creation, stage-to-column moves and
-  transition comments, with the Host board as the source of truth. It runs as an agent that can see the
-  Kanban tools and records a reason in the diagnostics when it is skipped.
+- The Kanban mirror (`kanbanSync`) is a one-way projection into a **`Team Mode` lane of its own**: the
+  mirror creates that column, keeps every mirrored card there and writes the stage into the transition
+  comment (`stage column: Test`). It never moves a card into a column the board's orchestrator owns,
+  because that would make the Kanban plugin start role sessions Team Mode does not own. The Host board
+  stays authoritative; the mirror runs as an agent that can see the Kanban tools and records in the
+  diagnostics why a projection was skipped.
 - Role profiles are continuable subagents of the Manager session: while a Manager chat is closed
   the roles sleep and cold-resume on the next delivery. Their transcripts stay readable.
 - One Manager per workspace is active at a time; opening a new Team chat rebinds the Manager and

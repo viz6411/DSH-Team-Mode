@@ -313,8 +313,15 @@ test('the Kanban mirror maps a task stage or status onto a real board column', a
   assert.equal(kanban.resolveColumnId(board, 'review'), 'c3')
   assert.equal(kanban.resolveColumnId(board, 'done'), 'c4')
   assert.equal(kanban.resolveColumnId({ columns: [{ id: 'x', title: 'Свои дела' }] }, 'in-progress'), null)
-  assert.deepEqual(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), { id: 'k7', columnId: 'c5' })
-  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify' }, board), null, 'a task without a mirrored card is not moved')
+  // Mirrored cards live in their own lane so the board's orchestrator never pulls them into a role column.
+  const laneBoard = { columns: [...board.columns, { id: 'c9', title: kanban.LANE_TITLE }] }
+  assert.equal(kanban.laneColumnId(laneBoard), 'c9')
+  assert.equal(kanban.laneColumnId(board), null, 'a board without the lane has no mirror column')
+  assert.deepEqual(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, laneBoard), { id: 'k7', columnId: 'c9' })
+  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), null, 'without a lane the mirror does not move the card into a role column')
+  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify' }, laneBoard), null, 'a task without a mirrored card is not moved')
+  assert.equal(kanban.stageColumnTitle({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), 'Test')
+  assert.ok(kanban.transitionComment({ id: 't1', status: 'active', stage: 'verify' }, { kind: 'claimed', role: 'tester' }, board).includes('stage column: Test'))
 })
 
 test('store.mutate returns exactly what its callback returns and persists the mutation', async () => {

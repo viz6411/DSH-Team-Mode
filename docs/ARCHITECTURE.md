@@ -119,6 +119,21 @@ the subagent UI in the Manager chat): Team Mode deliberately does not build its 
   `$DSH_HOME/team-mode/panel-signals.log`: the Host log is not journald here, so this is the only
   remote diagnostic a panel plugin has.
 
+## Kanban mirror: one lane, never the board's automation
+
+Measured on this host: the Kanban plugin runs its own orchestrator (`<workspace>/.dsh-kanban-orch.json`:
+`sourceColumnIds: [c60]`, `entryColumnId: c2`, `columnRoles: {c2: developer, c5: tester, c3: reviewer}`,
+`dispatchEnabled: true`, `dispatchModel: deepseek-proxy/deepseek-chat`). A card that lands in its source
+or entry column is pulled into a role column and the board **starts a role session of its own** — for
+Team Mode work that means workers Team Mode does not own, on a model Team Mode did not choose.
+
+Rule: mirrored cards live in a column named `Team Mode` that the mirror creates when the board has none,
+and `movePayload` only ever moves them into that lane. The human-facing stage column is named inside the
+transition comment (`stage column: Test`) so the reader still sees which stage a task is at, while the
+Team Mode board stays authoritative and the board's own automation stays a stranger to these cards.
+`columnKeyFor` and `resolveColumnId` remain for that reporting and for a future mode that drives the
+board's columns deliberately.
+
 ## Rules learned from the first real install (round 3)
 
 These are the reasons the mode appeared to "not work at all", in the order they were found.

@@ -18,7 +18,7 @@ import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
 import { boardView } from './lib/board.js'
-import { CARD_LABEL, cardTitle, cardPayload, transitionComment, cardIdOf, movePayload, toolFailure as kanbanToolFailure, hasLabel as kanbanHasLabel } from './lib/kanban.js'
+import { CARD_LABEL, LANE_TITLE, cardTitle, cardPayload, transitionComment, cardIdOf, movePayload, laneColumnId, toolFailure as kanbanToolFailure, hasLabel as kanbanHasLabel } from './lib/kanban.js'
 import { RoleCatalog } from './lib/roles.js'
 import { normalizeWorkflow, activeWorkerCount } from './lib/workflow.js'
 
@@ -239,13 +239,21 @@ export function apply(ctx, config) {
 
   /** Move the mirrored card to the column its current stage or status maps to. */
   const mirrorMove = async (agent, task) => {
-    if (!config.kanbanSync || !task?.kanbanCardId || !agent) return false
-    const read = await kanbanCall(agent, 'kanban_get', {})
-    if (!read?.ok) return false
-    const move = movePayload(task, read.value?.board)
-    if (!move) return false
+    if (!config.kanbanSync || !task?.kanbanCardId || !agent) return null
+    let read = await kanbanCall(agent, 'kanban_get', {})
+    if (!read?.ok) return null
+    if (!laneColumnId(read.value?.board)) {
+      const created = await kanbanCall(agent, 'kanban_add_column', { title: LANE_TITLE })
+      if (created?.ok) read = await kanbanCall(agent, 'kanban_get', {})
+    }
+    const board = read.value?.board
+    const move = movePayload(task, board)
+    if (!move) {
+      await recordPanelSignal('kanban-lane-missing', `task ${task.id}: the board has no "${LANE_TITLE}" column and it could not be created`)
+      return null
+    }
     const moved = await kanbanCall(agent, 'kanban_move_card', move)
-    return Boolean(moved?.ok)
+    return { board, moved: Boolean(moved?.ok) }
   }
 
   const mirrorComment = async (workspace, task, event, seedAgent) => {
@@ -257,7 +265,10 @@ export function apply(ctx, config) {
     }
     for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
       const moved = await mirrorMove(candidate, task)
-      const commented = await kanbanCall(candidate, 'kanban_add_comment', { id: task.kanbanCardId, content: transitionComment(task, event) })
+      const commented = await kanbanCall(candidate, 'kanban_add_comment', {
+        id: task.kanbanCardId,
+        content: transitionComment(task, event, moved?.board),
+      })
       if (commented) return moved
     }
   }
@@ -708,7 +719,9 @@ export function apply(ctx, config) {
         if (managerAgent) {
           await deliver(managerAgent, managerId, 'approval', `The user approved task ${payload.taskId} in the Team panel. Report the outcome and continue the workflow.`)
         }
-        return { ok: true, task: taskView(approved.task) }
+        const view = taskView(approved.task)
+        await mirrorComment({ id: payload.workspaceId, path: payload.path }, view, { kind: 'accepted', text: payload.note ?? 'approved in the Team panel' }, null)
+        return { ok: true, task: view }
       })
       return result
     },
@@ -721,13 +734,20 @@ export function apply(ctx, config) {
           scheduleHandOffRetry({ id: payload.workspaceId, path: payload.path }, rejected.task.id, 'reviewer')
           hand = { ok: true, note: `the "${rejected.task.ownerRole}" profile was refused while the board was busy; the Host retries the hand-off shortly` }
         }
-        return { ok: true, task: taskView(rejected.task), note: hand.ok ? null : hand.error }
+        const view = taskView(rejected.task)
+        await mirrorComment({ id: payload.workspaceId, path: payload.path }, view, { kind: 'sent back', text: `${payload.note ?? ''} (returned to stage ${rejected.task.stage})` }, null)
+        return { ok: true, task: view, note: hand.ok ? null : hand.error }
       })
       return result
     },
     async cancelTask(payload) {
-      await store.mutate(payload.workspaceId, payload.path, (data) => board.cancelTask(data, payload.taskId, payload.reason))
-      return { ok: true }
+      const cancelled = await store.mutate(payload.workspaceId, payload.path, (data) => {
+        const result = board.cancelTask(data, payload.taskId, payload.reason)
+        return result.ok ? taskView(result.task) : result
+      })
+      if (!cancelled?.id) return cancelled
+      await mirrorComment({ id: payload.workspaceId, path: payload.path }, cancelled, { kind: 'cancelled', text: payload.reason ?? 'closed from the Team panel' }, payload.sessionId ? ctx.agents.get(payload.sessionId) : null)
+      return { ok: true, task: cancelled }
     },
     /** Panel keep-alive: proves on the Host side that the browser actually executed the Client half. */
     async reconcile(payload) {
