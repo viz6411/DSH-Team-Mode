@@ -60,3 +60,14 @@ naming the setting; raising the value is a profile change and belongs to the hum
   moves are implemented and unit-tested; the live mirror needs the newest installed revision — see
   projected today).
 - `CHANGE_ME` in the repository URL until the GitHub address is known.
+
+## Open defect (measured 2026-11-08, after the Kanban cleanup)
+
+A mirrored card gets its `claimed` comment through the Host projection, but the **stage transition of a
+completed stage did not reach the card**: task `t-9f2e3530-409d…` was completed by the designer (the task
+moved to stage `build`, owner `developer`), card `k1052` stayed in column `c60 Ready` with exactly one
+comment (`claimed … revision 2`) and `~/.dsh/team-mode/panel-signals.log` contains **no** `kanban-*` entry
+for that transition — the projection path in `complete` (index.js:629-631) was either skipped or its
+`result.task` lacked the mirrored card id. `probeForward(role=designer)` reproduced the same silence.
+Next step: assert `result.task.kanbanCardId` presence in the mirror call, and make the transition comment
+and the column move verifiable in a unit test against a fake `kanbanBoard` service.
