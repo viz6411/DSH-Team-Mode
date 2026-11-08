@@ -13,7 +13,7 @@
       config:
         managerPresetIds: [team-manager]
         spawnProvider: spawn
-        maxConcurrentWorkers: 3
+        maxConcurrentWorkers: 1
         maxProfiles: 8
         maxTasks: 256
         kanbanSync: true

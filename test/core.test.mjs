@@ -9,7 +9,7 @@ import { normalizeWorkflow, gateDelegate, gateClaim, gateComplete, gateConcurren
 import { WorkspaceStore, emptyWorkspace } from '../lib/store.js'
 import * as board from '../lib/board.js'
 import { RoleCatalog } from '../lib/roles.js'
-import { cardPayload, transitionComment, cardIdOf, cardTitle, toolFailure, hasLabel } from '../lib/kanban.js'
+import { cardPayload, transitionComment, cardIdOf, cardTitle } from '../lib/kanban.js'
 
 const WORKFLOW = {
   stages: [
@@ -230,7 +230,7 @@ test('kanban projection payload is a readable mirror of the task', () => {
   const payload = cardPayload(task)
   assert.equal(payload.title, '[TM task-1] Add an “Ограничения” section to README')
   assert.equal(payload.assignee, 'developer')
-  assert.equal(payload.label, 'team-mode')
+  assert.equal(payload.label, undefined, 'the mirror does not invent a board label: labels belong to the board owner')
   assert.ok(payload.note.includes('Five lines about environment limits.'))
   assert.ok(payload.note.includes('`task-0`'))
   assert.ok(payload.note.includes('README.md'))
@@ -313,13 +313,11 @@ test('the Kanban mirror maps a task stage or status onto a real board column', a
   assert.equal(kanban.resolveColumnId(board, 'review'), 'c3')
   assert.equal(kanban.resolveColumnId(board, 'done'), 'c4')
   assert.equal(kanban.resolveColumnId({ columns: [{ id: 'x', title: 'Свои дела' }] }, 'in-progress'), null)
-  // Mirrored cards live in their own lane so the board's orchestrator never pulls them into a role column.
-  const laneBoard = { columns: [...board.columns, { id: 'c9', title: kanban.LANE_TITLE }] }
-  assert.equal(kanban.laneColumnId(laneBoard), 'c9')
-  assert.equal(kanban.laneColumnId(board), null, 'a board without the lane has no mirror column')
-  assert.deepEqual(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, laneBoard), { id: 'k7', columnId: 'c9' })
-  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), null, 'without a lane the mirror does not move the card into a role column')
-  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify' }, laneBoard), null, 'a task without a mirrored card is not moved')
+  // A mirrored card sits in the stage column the board already owns: the Team Mode chain and the board's
+  // dispatcher work on the same column set, with no private lane and no board label.
+  assert.deepEqual(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), { id: 'k7', columnId: 'c5' })
+  assert.deepEqual(kanban.movePayload({ id: 't1', status: 'awaiting_approval', stage: null, kanbanCardId: 'k7' }, board), { id: 'k7', columnId: 'c3' })
+  assert.equal(kanban.movePayload({ id: 't1', status: 'active', stage: 'verify' }, board), null, 'a task without a mirrored card is not moved')
   assert.equal(kanban.stageColumnTitle({ id: 't1', status: 'active', stage: 'verify', kanbanCardId: 'k7' }, board), 'Test')
   assert.ok(kanban.transitionComment({ id: 't1', status: 'active', stage: 'verify' }, { kind: 'claimed', role: 'tester' }, board).includes('stage column: Test'))
 })
@@ -362,14 +360,6 @@ test('reconcileInterrupted only reopens tasks whose role session is not resident
   assert.ok(reClaimed.ok, reClaimed.error)
   assert.deepEqual(board.reconcileInterrupted(data, isLive), [created.task.id], 'a new revision is reported again')
   rmSync(dir, { recursive: true, force: true })
-})
-
-test('the Kanban mirror treats a tool-level refusal as a failure', () => {
-  assert.equal(toolFailure({ ok: false, message: 'Label not found: team-mode' }), 'Label not found: team-mode')
-  assert.equal(toolFailure({ ok: false }), 'the Kanban tool refused the call')
-  assert.equal(toolFailure({ ok: true, board: { cards: [] } }), null)
-  assert.equal(hasLabel({ labels: [{ name: 'team-mode' }] }, 'team-mode'), true)
-  assert.equal(hasLabel({ board: { labels: ['bug'] } }, 'team-mode'), false)
 })
 
 test('the mirrored card id is recovered from the board answer by its title', () => {

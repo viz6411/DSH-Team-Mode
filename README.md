@@ -122,16 +122,13 @@ applies to profiles created after the change, and recreating a live profile is y
 ## Limits and honesty
 
 
-- Every chat gets a **Team board** tab (`conversation.view` registration, id `team-board`): the Manager
-  chat and each role session can open the Team Mode tasks, the role profiles with their live activity and
-  the `[TM …]` lane cards. It names the workspace itself instead of letting the board guess, which is why
-  it works in a role session where the shipped Board tab answers `Unknown workspace: default`.
-- The Kanban mirror (`kanbanSync`) is a one-way projection into a **`Team Mode` lane of its own**: the
-  mirror creates that column, keeps every mirrored card there and writes the stage into the transition
-  comment (`stage column: Test`). It never moves a card into a column the board's orchestrator owns,
-  because that would make the Kanban plugin start role sessions Team Mode does not own. The Host board
-  stays authoritative; the mirror runs as an agent that can see the Kanban tools and records in the
-  diagnostics why a projection was skipped.
+- **One agent works at a time.** `maxConcurrentWorkers` defaults to 1, and a hand-off defers while another
+  role profile is running: this host has one inference slot and one cache window, so a parallel wake-up is a
+  cache miss and minutes of prefill on every step. See [docs/SYMBIOSIS.md](docs/SYMBIOSIS.md) for the board
+  side of the same rule (`enforceWip: true`, `wipLimit: 1`, `dispatchEnabled: false`).
+- The Kanban mirror (`kanbanSync`) is a one-way projection written through the Kanban plugin's channel
+  board service (`kanbanBoard`: `read` + the whitelisted `act`). A mirrored card sits in the stage column
+  the board already owns and every transition is a comment on it. No private column, no board label.
 - Role profiles are continuable subagents of the Manager session: while a Manager chat is closed
   the roles sleep and cold-resume on the next delivery. Their transcripts stay readable.
 - One Manager per workspace is active at a time; opening a new Team chat rebinds the Manager and

@@ -18,7 +18,7 @@ import { configSchema } from './lib/schema.js'
 import { WorkspaceStore } from './lib/store.js'
 import * as board from './lib/board.js'
 import { boardView } from './lib/board.js'
-import { CARD_LABEL, LANE_TITLE, cardTitle, cardPayload, transitionComment, cardIdOf, movePayload, laneColumnId, toolFailure as kanbanToolFailure, hasLabel as kanbanHasLabel } from './lib/kanban.js'
+import { cardTitle, cardPayload, transitionComment, cardIdOf, movePayload } from './lib/kanban.js'
 import { RoleCatalog } from './lib/roles.js'
 import { normalizeWorkflow, activeWorkerCount } from './lib/workflow.js'
 
@@ -33,7 +33,7 @@ export const Config = configSchema({
   /** Registered @deepseek-ai/dsh-subagent provider used to start role profiles. */
   spawnProvider: { type: 'string', default: 'spawn' },
   /** How many role agents may hold an active task at once (local-model friendly). */
-  maxConcurrentWorkers: { type: 'number', default: 3 },
+  maxConcurrentWorkers: { type: 'number', default: 1 },
   maxProfiles: { type: 'number', default: 8 },
   maxTasks: { type: 'number', default: 256 },
   /** Directory of editable role agent.md files. */
@@ -133,156 +133,125 @@ export function apply(ctx, config) {
   const abortSignal = () => new AbortController().signal
 
   /**
-   * Kanban projection (spec §5.5, `kanbanSync`): the board is a human-readable mirror written
-   * through the Kanban plugin's own tools, so its per-workspace rules stay with the Kanban plugin.
-   * When the plugin is absent the call is skipped and Team Mode runs without it.
+   * Kanban projection (spec §5.5, `kanbanSync`). The Kanban plugin exposes a channel-facing board
+   * service — `kanbanBoard` with `read` and a whitelisted `act` (getCard, addCard, updateCard, moveCard,
+   * addComment) — and Team Mode writes its mirror through it. Every board rule (which board belongs to
+   * which workspace, the serialized queue the board UI and the board's own engine share, the column set)
+   * therefore stays with the Kanban plugin, and the projection works from any session, role sessions
+   * included, because it does not need a session that can see the Kanban tools.
+   *
+   * Mirror cards are recognised by their `[TM <task id>]` title. No board label is created or required:
+   * labels are the person's board vocabulary, and a channel that insists on one breaks on boards that
+   * do not have it.
    */
-  const kanbanCall = async (agent, toolName, args) => {
-    if (!config.kanbanSync) {
-      await recordPanelSignal('kanban-skipped', `${toolName}: kanbanSync is off in this profile's teamMode config`)
-      return null
-    }
-    if (!agent) {
-      await recordPanelSignal('kanban-skipped', `${toolName}: no live agent to run the projection as`)
-      return null
-    }
-    if (!ctx.tools?.get?.(toolName, agent)) {
-      await recordPanelSignal('kanban-skipped', `${toolName}: not visible to agent ${agent.id} (preset ${agent.session?.header?.agentPreset ?? 'none'})`)
-      return null
-    }
+  const boardService = () => {
+    if (!config.kanbanSync) return null
     try {
-      const result = await ctx.tools.execute({ callId: newId('call'), name: toolName, arguments: args, agent, signal: abortSignal() })
-      if (result?.isError) {
-        const error = result?.error?.message ?? `${toolName} failed`
-        await recordPanelSignal('kanban-error', `${toolName}: ${error}`)
+      const service = typeof ctx.get === 'function' ? ctx.get('kanbanBoard') : null
+      return service && typeof service.read === 'function' && typeof service.act === 'function' ? service : null
+    } catch {
+      return null
+    }
+  }
+
+  const boardRead = async (workspace) => {
+    const service = boardService()
+    if (!service) return { ok: false, error: 'the Kanban board service is not available in this profile' }
+    try {
+      const view = await service.read({ workspaceId: workspace.id, path: workspace.path })
+      if (!view || view.ok === false) {
+        const error = view?.message ?? view?.code ?? 'the board could not be read'
+        await recordPanelSignal('kanban-refused', `read: ${error}`)
         return { ok: false, error }
       }
-      const refusal = kanbanToolFailure(result?.value)
-      if (refusal) {
-        await recordPanelSignal('kanban-refused', `${toolName}: ${refusal}`)
-        return { ok: false, error: refusal }
-      }
-      return { ok: true, value: result?.value }
+      return { ok: true, value: view }
     } catch (error) {
-      ctx.logger?.warn?.(`dsh-team-mode: kanban projection "${toolName}" failed: ${error?.message ?? error}`)
+      await recordPanelSignal('kanban-error', `read: ${error?.message ?? error}`)
       return { ok: false, error: error?.message ?? String(error) }
     }
   }
 
-  /**
-   * Kanban tools live in agent compositions, so the mirror has to run as an agent that actually sees
-   * them: the caller first, then the Manager session, then any live role profile.
-   */
-  /** The board is read through a session that can actually see the Kanban tools. */
-  const kanbanReadBoard = async (workspaceId) => {
-    for (const candidate of await mirrorCandidates(undefined, workspaceId)) {
-      const read = await kanbanCall(candidate, 'kanban_get', {})
-      if (read?.ok) return read
+  const boardAct = async (workspace, method, args) => {
+    const service = boardService()
+    if (!service) {
+      await recordPanelSignal('kanban-skipped', `${method}: kanbanSync is off or the Kanban plugin does not expose its board service`)
+      return { ok: false, error: 'the Kanban board service is not available' }
     }
-    return { ok: false, error: 'no session of this workspace can see the Kanban tools' }
+    try {
+      const result = await service.act({ workspaceId: workspace.id, path: workspace.path, method, args, actor: 'team-mode' })
+      if (!result || result.ok === false) {
+        const error = result?.message ?? result?.code ?? `${method} was refused by the board`
+        await recordPanelSignal('kanban-refused', `${method}: ${error}`)
+        return { ok: false, error }
+      }
+      return { ok: true, value: result }
+    } catch (error) {
+      await recordPanelSignal('kanban-error', `${method}: ${error?.message ?? error}`)
+      return { ok: false, error: error?.message ?? String(error) }
+    }
   }
 
-  const mirrorCandidates = async (seedAgent, workspaceId) => {
-    const out = []
-    const seen = new Set()
-    const push = (agent) => {
-      if (!agent || seen.has(agent.id)) return
-      seen.add(agent.id)
-      out.push(agent)
-    }
-    push(seedAgent)
-    const data = await dataOf(workspaceId, undefined)
-    push(data.managerSessionId ? ctx.agents.get(data.managerSessionId) : null)
-    for (const profile of data.profiles ?? []) push(ctx.agents.get(profile.sessionId))
-    return out
+  /** The mirrored card's id: the board answers with a message, so the id is found by title when needed. */
+  const mirrorCardId = async (workspace, title, createdValue) => {
+    const direct = cardIdOf(createdValue, title)
+    if (direct) return direct
+    const read = await boardRead(workspace)
+    return read?.ok ? cardIdOf(read.value, title) : null
   }
 
-  /**
-   * Card creation fails when the label the mirror tags its cards with does not exist on the board, so the
-   * mirror creates that label and falls back to an unlabelled card when the board refuses it. Boards are
-   * per workspace and each has its own labels, so readiness is tracked per workspace — a label created on
-   * one board says nothing about another one.
-   */
-  const labelReadyWorkspaces = new Set()
-  const ensureKanbanLabel = async (agent, workspaceId) => {
-    if (labelReadyWorkspaces.has(workspaceId)) return true
-    const read = await kanbanCall(agent, 'kanban_get_label', {})
-    if (read?.ok && kanbanHasLabel(read.value, CARD_LABEL)) {
-      labelReadyWorkspaces.add(workspaceId)
-      return true
-    }
-    const added = await kanbanCall(agent, 'kanban_add_label', { name: CARD_LABEL, color: '#7c5cff' })
-    if (added?.ok) labelReadyWorkspaces.add(workspaceId)
-    return Boolean(added?.ok)
-  }
-
-  const mirrorCard = async (workspace, task, seedAgent) => {
+  const mirrorCard = async (workspace, task) => {
     const title = cardTitle(task)
-    let created = null
-    let runner = null
-    let lastError = null
-    for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
-      const payload = cardPayload(task)
-      if (!(await ensureKanbanLabel(candidate, workspace.id))) delete payload.label
-      created = await kanbanCall(candidate, 'kanban_add_card', payload)
-      if (created?.ok) { runner = candidate; break }
-      lastError = created?.error ?? lastError
-      created = null
-    }
-    if (!created) {
-      const note = `kanban mirror failed: ${lastError ?? 'no agent could run the projection'}`
+    const created = await boardAct(workspace, 'addCard', cardPayload(task))
+    if (!created.ok) {
+      const note = `kanban mirror failed: ${created.error}`
       await recordPanelSignal('kanban-mirror-failed', `task ${task.id}: ${note}`)
       return { kanbanNote: note }
     }
-    let cardId = cardIdOf(created.value, title)
-    if (!cardId) {
-      const read = await kanbanCall(runner, 'kanban_get', {})
-      cardId = read?.ok ? cardIdOf(read.value, title) : null
-    }
+    const cardId = await mirrorCardId(workspace, title, created.value)
     if (!cardId) {
       await recordPanelSignal('kanban-card-id-missing', `task ${task.id}: the card titled "${title}" was added but its id could not be read`)
       return { kanbanNote: 'the Kanban card was added but its id could not be read, so later transitions are not mirrored' }
     }
     await store.mutate(workspace.id, workspace.path, (data) => board.setKanbanCardId(data, task.id, cardId))
-    await mirrorMove(runner, { ...task, kanbanCardId: cardId })
-    return { kanbanCardId: cardId }
+    const moved = await mirrorMove(workspace, { ...task, kanbanCardId: cardId })
+    return { kanbanCardId: cardId, board: moved?.board }
   }
 
   /** Move the mirrored card to the column its current stage or status maps to. */
-  const mirrorMove = async (agent, task) => {
-    if (!config.kanbanSync || !task?.kanbanCardId || !agent) return null
-    let read = await kanbanCall(agent, 'kanban_get', {})
+  const mirrorMove = async (workspace, task) => {
+    if (!config.kanbanSync || !task?.kanbanCardId) return null
+    const read = await boardRead(workspace)
     if (!read?.ok) return null
-    if (!laneColumnId(read.value?.board)) {
-      const created = await kanbanCall(agent, 'kanban_add_column', { title: LANE_TITLE })
-      if (created?.ok) read = await kanbanCall(agent, 'kanban_get', {})
-    }
-    const board = read.value?.board
-    const move = movePayload(task, board)
+    const boardView = read.value
+    const move = movePayload(task, boardView)
     if (!move) {
-      await recordPanelSignal('kanban-lane-missing', `task ${task.id}: the board has no "${LANE_TITLE}" column and it could not be created`)
-      return null
+      await recordPanelSignal('kanban-column-missing', `task ${task.id}: the board has no column for stage "${task.stage ?? task.status}"`)
+      return { board: boardView, moved: false }
     }
-    const moved = await kanbanCall(agent, 'kanban_move_card', move)
-    return { board, moved: Boolean(moved?.ok) }
+    const moved = await boardAct(workspace, 'moveCard', move)
+    return { board: boardView, moved: moved.ok }
   }
 
-  const mirrorComment = async (workspace, task, event, seedAgent) => {
+  const mirrorComment = async (workspace, task, event) => {
     if (!workspace || !task) return
     if (!task.kanbanCardId) {
-      const created = await mirrorCard(workspace, task, seedAgent)
+      const created = await mirrorCard(workspace, task)
       if (!created?.kanbanCardId) return
       task = { ...task, kanbanCardId: created.kanbanCardId }
     }
-    for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
-      const moved = await mirrorMove(candidate, task)
-      const commented = await kanbanCall(candidate, 'kanban_add_comment', {
-        id: task.kanbanCardId,
-        content: transitionComment(task, event, moved?.board),
-      })
-      if (commented) return moved
-    }
+    const moved = await mirrorMove(workspace, task)
+    await boardAct(workspace, 'addComment', { id: task.kanbanCardId, content: transitionComment(task, event, moved?.board) })
   }
+
+  /**
+   * One owner of the model request. The Kanban engine has a hook for this — it asks the Host service
+   * `groupChatWake` before it creates a role session of its own — but that key belongs to the group-chat
+   * channel plugin on this profile, and Team Mode must not claim another plugin\'s service. The seam is
+   * configured instead: with `dispatchEnabled: false` in `<workspace>/.dsh-kanban-orch.json` the engine
+   * keeps its own discipline (autoPull, WIP limit, labels, comments, the serialized board queue) and never
+   * starts a worker, while Team Mode is the one that wakes role profiles — one at a time, because this
+   * host has a single inference slot and a single cache window. See docs/SYMBIOSIS.md.
+   */
 
   /** Diagnostic trail for the browser half: the Host log is not journald here, so keep it on disk. */
   const recordPanelSignal = async (kind, detail) => {
@@ -309,6 +278,7 @@ export function apply(ctx, config) {
     }
     return { id: `cwd:${cwd}`, path: cwd, title: cwd }
   }
+
 
   const dataOf = async (workspaceId, workspacePath) => {
     const data = await store.load(workspaceId, workspacePath)
@@ -398,6 +368,13 @@ export function apply(ctx, config) {
   const handOff = async (data, task, senderAgent) => {
     const role = task.ownerRole
     if (!role) return { ok: true, skipped: true }
+    // Strict chain: this host has one inference slot and one cache window, so a second awake agent is a
+    // cache miss on every request. While another role works, the next hand-off waits for it to finish.
+    const busy = (data.profiles ?? []).filter((profile) => profile.role !== role && liveStatus(profile.sessionId) === 'running').map((profile) => profile.role)
+    if (busy.length >= Math.max(1, config.maxConcurrentWorkers)) {
+      scheduleHandOffRetry({ id: data.workspaceId ?? null, path: data.path ?? null }, task.id, role)
+      return { ok: true, deferred: true, note: `the stage closed; "${role}" starts as soon as ${busy.join(', ')} finish (one agent at a time on this host)` }
+    }
     const managerAgent = data.managerSessionId ? ctx.agents.get(data.managerSessionId) : null
     // Every role profile is a direct child of the Manager session: the platform only allows a parent
     // or a direct child to message a continuable child, so keeping one parent for the whole team is
@@ -781,27 +758,6 @@ export function apply(ctx, config) {
           activity: liveStatus(profile.sessionId),
           personaDrift: Boolean(profile.personaDrift),
         })),
-      }
-    },
-    /** Read of the Kanban board for a Team Mode workspace, so the Team view can show the board inside
-     * any session — including a role session, where the board's own panel cannot resolve a workspace. */
-    async boardSnapshot(payload) {
-      const workspaceId = payload?.workspaceId
-      if (!workspaceId) return { ok: false, error: 'workspaceId is required' }
-      const data = await dataOf(workspaceId, payload?.path)
-      const read = await kanbanReadBoard(workspaceId)
-      if (!read?.ok) return { ok: false, error: read?.error ?? 'the Kanban board could not be read' }
-      const board = read.value?.board ?? read.value
-      const cards = Array.isArray(board?.cards) ? board.cards : []
-      return {
-        ok: true,
-        workspaceId,
-        path: data.path ?? null,
-        columns: Array.isArray(board?.columns) ? board.columns : [],
-        cards,
-        laneCards: cards.filter((card) => String(card?.title ?? '').startsWith('[TM')),
-        tasks: (data.tasks ?? []).filter((task) => task.status === 'active' || task.status === 'queued' || task.status === 'awaiting_approval').map(taskView),
-        profiles: (data.profiles ?? []).map((profile) => ({ role: profile.role, sessionId: profile.sessionId, activity: liveStatus(profile.sessionId) })),
       }
     },
     async ping(payload) {
