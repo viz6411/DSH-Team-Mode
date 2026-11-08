@@ -74,6 +74,9 @@ board just waits for a person.
 | resident role sessions | profile patch, `@deepseek-ai/dsh-subagent → maxActiveSubagents` | 4 (residency, not parallel work) |
 | one card in the flow | `<workspace>/.dsh-kanban-orch.json` → `wipLimit`, `enforceWip` | 1, true |
 | board engine may start a worker | same file → `dispatchEnabled` | **false** |
+| shared workflow policy (all boards) | `$DSH_HOME/kanban-orch.global.json` (our fork, R2.9) | columns/WIP/auto-pull/stamping live here |
+| per-board switch | `<workspace>/.dsh-kanban-orch.json` keeps only `enabled` (R2.9) | `true` on `/home/viz/work` |
+| a card may only be assigned to a role that exists | `/api/kanban` validates `assignee` against `agentPresets`, and the card editor offers only those roles | enforced since R2.9 |
 | which columns the engine drives | same file → `sourceColumnIds`, `entryColumnId`, `doneColumnIds`, `columnRoles` | c60 → c2, c4 done, roles on c2/c5/c3 |
 | how often the engine runs | same file → `tickMs` | 20000 ms |
 

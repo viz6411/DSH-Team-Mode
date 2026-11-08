@@ -58,6 +58,7 @@ window.__ModuleLoader__.load({
         loadFailed: 'Could not load the team: ',
         concurrency: 'Busy roles',
         personaDrift: 'role file changed',
+        panelTitle: 'Team',
       },
       zh: {
         workspaceLabel: '工作区',
@@ -104,6 +105,7 @@ window.__ModuleLoader__.load({
         loadFailed: '无法加载团队：',
         concurrency: '忙碌角色',
         personaDrift: '角色文件已变更',
+        panelTitle: '团队',
       },
       ru: {
         workspaceLabel: 'Воркспейс',
@@ -150,6 +152,7 @@ window.__ModuleLoader__.load({
         loadFailed: 'Не загрузилось состояние команды: ',
         concurrency: 'Занятых ролей',
         personaDrift: 'файл роли изменён',
+        panelTitle: 'Команда',
       },
     }
 
