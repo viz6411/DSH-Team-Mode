@@ -14,7 +14,17 @@ window.__ModuleLoader__.load({
 
     const DICTS = {
       en: {
-        panelTitle: 'Team',
+        teamView: 'Team board',
+        boardTitle: 'Kanban lane',
+        lane: 'Cards mirrored by Team Mode',
+        noLaneCards: 'No mirrored cards yet — the mirror writes them when a task is delegated.',
+        tasksLabel: 'Team Mode tasks',
+        running: 'running',
+        inactive: 'inactive',
+        stage: 'stage',
+        owner: 'owner',
+        column: 'column',
+        boardUnavailable: 'The Kanban board could not be read from this session:',
         workspaceLabel: 'Workspace',
         loading: 'Loading team…',
         refresh: 'Refresh',
@@ -63,7 +73,17 @@ window.__ModuleLoader__.load({
         personaDrift: 'role file changed',
       },
       zh: {
-        panelTitle: '团队',
+        teamView: '团队看板',
+        boardTitle: '看板通道',
+        lane: 'Team Mode 镜像的卡片',
+        noLaneCards: '尚无镜像卡片——委派任务后镜像会写入。',
+        tasksLabel: 'Team Mode 任务',
+        running: '运行中',
+        inactive: '未运行',
+        stage: '阶段',
+        owner: '负责人',
+        column: '列',
+        boardUnavailable: '此会话无法读取看板：',
         workspaceLabel: '工作区',
         loading: '正在加载团队…',
         refresh: '刷新',
@@ -112,7 +132,17 @@ window.__ModuleLoader__.load({
         personaDrift: '角色文件已变更',
       },
       ru: {
-        panelTitle: 'Команда',
+        teamView: 'Команда · доска',
+        boardTitle: 'Полоса Kanban',
+        lane: 'Карточки, зеркалом Team Mode',
+        noLaneCards: 'Зеркальных карточек пока нет — они появятся, когда задача будет делегирована.',
+        tasksLabel: 'Задачи Team Mode',
+        running: 'работает',
+        inactive: 'не работает',
+        stage: 'стадия',
+        owner: 'владелец',
+        column: 'колонка',
+        boardUnavailable: 'Доску Kanban не удалось прочитать из этого сессии:',
         workspaceLabel: 'Воркспейс',
         loading: 'Загружаю команду…',
         refresh: 'Обновить',
@@ -179,6 +209,11 @@ window.__ModuleLoader__.load({
 .team-tag.is-running { color: var(--dsw-alias-state-business-primary, #1a7f37); }
 .team-tag.is-await { color: var(--dsw-alias-state-warn-primary, #b8860b); }
 .team-tag.is-drift { color: var(--dsw-alias-state-warn-primary, #b8860b); }
+.team-h3 { margin: 12px 0 4px; font-size: 1em; font-weight: 600; }
+.team-label { font-size: .9em; color: var(--dsw-alias-label-secondary, rgba(128,128,128,.9)); }
+.team-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.team-list li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; border: 1px solid rgba(128,128,128,.18); border-radius: 8px; padding: 6px 9px; }
+.team-board-view { padding: 10px 12px; }
 .team-btn { border: 1px solid rgba(128,128,128,.35); border-radius: 7px; padding: 3px 9px; background: transparent; color: inherit; cursor: pointer; }
 .team-btn:disabled { opacity: .5; cursor: default; }
 .team-input, .team-select, .team-text { border: 1px solid rgba(128,128,128,.35); border-radius: 7px; padding: 4px 7px; background: transparent; color: inherit; font: inherit; }
@@ -188,6 +223,129 @@ window.__ModuleLoader__.load({
 .team-tasks th { font-size: .88em; color: var(--dsw-alias-label-tertiary, rgba(128,128,128,.85)); font-weight: 600; }
 .team-note { width: 220px; }
 `
+
+    /**
+     * Session-scoped Team view. The board's own panel resolves a workspace from the chat it belongs to,
+     * and a role session opened through the subagent lineage has no such binding — it asks for 'default'
+     * and the board answers 'Unknown workspace'. This view never asks the board to guess: it names the
+     * Team Mode workspace it wants and the Host reads the board for that workspace.
+     */
+    function TeamBoardView({ t }) {
+      const [workspaces, setWorkspaces] = React.useState([])
+      const [workspaceId, setWorkspaceId] = React.useState('')
+      const [data, setData] = React.useState(null)
+      const [error, setError] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+
+      const workspace = workspaces.find((item) => item.workspaceId === workspaceId) ?? workspaces[0] ?? null
+
+      const load = React.useCallback(async () => {
+        setBusy(true)
+        try {
+          if (!workspaces.length) {
+            const listed = await api('workspaces')
+            const items = Array.isArray(listed.workspaces) ? listed.workspaces : []
+            setWorkspaces(items)
+            setWorkspaceId((current) => current || (items[0] ? items[0].workspaceId : ''))
+            if (!items.length) {
+              setData(null)
+              setError('')
+              return
+            }
+          }
+          if (!workspace) return
+          const next = await api('boardSnapshot', { workspaceId: workspace.workspaceId, path: workspace.path })
+          setData(next)
+          setError('')
+        } catch (cause) {
+          setError(`${t('boardUnavailable')} ${String(cause?.message ?? cause)}`)
+        } finally {
+          setBusy(false)
+        }
+      }, [workspace, workspaces.length, t])
+
+      React.useEffect(() => {
+        void load()
+      }, [load])
+
+      const cards = data?.laneCards ?? []
+      const columns = new Map((data?.columns ?? []).map((column) => [String(column.id), column.title]))
+
+      return h(
+        'div',
+        { className: 'team-root team-board-view' },
+        h(
+          'div',
+          { className: 'team-row' },
+          h('label', { className: 'team-label' }, t('workspaceLabel')),
+          h(
+            'select',
+            {
+              className: 'team-select',
+              value: workspace?.workspaceId ?? '',
+              onChange: (event) => setWorkspaceId(event.target.value),
+            },
+            ...(workspaces.map((item) => h('option', { key: item.workspaceId, value: item.workspaceId }, item.path || item.workspaceId))),
+          ),
+          h('button', { className: 'team-btn', type: 'button', disabled: busy, onClick: () => void load() }, t('refresh')),
+        ),
+        error ? h('p', { className: 'team-error', role: 'alert' }, error) : null,
+        data
+          ? h(
+              'div',
+              { className: 'team-section' },
+              h('h3', { className: 'team-h3' }, t('profiles')),
+              h(
+                'div',
+                { className: 'team-row' },
+                ...((data.profiles ?? []).map((profile) =>
+                  h('span', { key: profile.sessionId, className: profile.activity === 'running' ? 'team-tag is-running' : 'team-tag' }, `${profile.role} · ${profile.activity === 'running' ? t('running') : t('inactive')}`),
+                )),
+              ),
+              h('h3', { className: 'team-h3' }, t('tasksLabel')),
+              h(
+                'ul',
+                { className: 'team-list' },
+                ...((data.tasks ?? []).map((task) =>
+                  h(
+                    'li',
+                    { key: task.id },
+                    h('strong', null, task.subject ?? task.id),
+                    h('span', { className: 'team-tag' }, `${t('stage')}: ${task.stage ?? task.status}`),
+                    h('span', { className: 'team-tag' }, `${t('owner')}: ${task.ownerRole ?? '—'}`),
+                    task.verdict ? h('span', { className: 'team-tag' }, task.verdict) : null,
+                  ),
+                )),
+              ),
+              h('h3', { className: 'team-h3' }, t('boardTitle')),
+              cards.length
+                ? h(
+                    'ul',
+                    { className: 'team-list' },
+                    ...cards.map((card) =>
+                      h(
+                        'li',
+                        { key: card.id },
+                        h('strong', null, card.title),
+                        h('span', { className: 'team-tag' }, `${t('column')}: ${columns.get(String(card.columnId)) ?? card.columnId}`),
+                        card.label ? h('span', { className: 'team-tag' }, card.label) : null,
+                      ),
+                    ),
+                  )
+                : h('p', { className: 'team-muted' }, t('noLaneCards')),
+            )
+          : null,
+      )
+    }
+
+    function TeamBoardGuard(props) {
+      try {
+        return h(TeamBoardView, props)
+      } catch (cause) {
+        panelFailure(`conversation view render: ${cause?.stack ?? cause}`)
+        return h('div', { className: 'team-root' }, h('p', { className: 'team-error', role: 'alert' }, `Team Mode: ${String(cause?.message ?? cause)}`))
+      }
+    }
 
     function TeamIcon({ size } = {}) {
       const edge = typeof size === 'number' && size > 0 ? size : 16
@@ -670,6 +828,21 @@ window.__ModuleLoader__.load({
           report('clientError', { message: `styles: ${cause?.message ?? cause}` })
         }
 
+        const disposers = []
+        try {
+          // A conversation view is session scoped, so the Team board is reachable from every chat —
+          // the Manager chat and each role session alike — without the board guessing a workspace.
+          const viewSlots = ctx.slots
+          if (!viewSlots) throw new Error('no slot surface is injected')
+          disposers.push(viewSlots.inject('conversation.view', () =>
+            viewSlots.register({ name: 'conversation.view', id: 'team-board', order: 21, label: () => t('teamView') }, (props) => h(TeamBoardGuard, { ...props, t })),
+          ))
+          report('ping', { detail: 'conversation view registered' })
+        } catch (cause) {
+          console.warn('dsh-team-mode: conversation view registration failed', cause)
+          report('clientError', { message: `conversation view: ${cause?.stack ?? cause}` })
+        }
+
         try {
           // The `main` and `sidebar.panellist` cells belong to the layout domain: they are reached
           // through the layout inject surface, the same way the shipped panel rows do.
@@ -690,10 +863,26 @@ window.__ModuleLoader__.load({
               disposeMain()
             }
           })
-          return () => disposePanels()
+          disposers.push(disposePanels)
+          return () => {
+            for (const dispose of disposers) {
+              try {
+                dispose()
+              } catch {
+                /* one disposer failing must not skip the rest */
+              }
+            }
+          }
         } catch (cause) {
           console.error('dsh-team-mode: slot registration failed', cause)
           report('clientError', { message: `slots: ${cause?.stack ?? cause}` })
+          for (const dispose of disposers) {
+            try {
+              dispose()
+            } catch {
+              /* already failing */
+            }
+          }
           return () => undefined
         }
       },

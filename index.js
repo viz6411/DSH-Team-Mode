@@ -173,6 +173,15 @@ export function apply(ctx, config) {
    * Kanban tools live in agent compositions, so the mirror has to run as an agent that actually sees
    * them: the caller first, then the Manager session, then any live role profile.
    */
+  /** The board is read through a session that can actually see the Kanban tools. */
+  const kanbanReadBoard = async (workspaceId) => {
+    for (const candidate of await mirrorCandidates(undefined, workspaceId)) {
+      const read = await kanbanCall(candidate, 'kanban_get', {})
+      if (read?.ok) return read
+    }
+    return { ok: false, error: 'no session of this workspace can see the Kanban tools' }
+  }
+
   const mirrorCandidates = async (seedAgent, workspaceId) => {
     const out = []
     const seen = new Set()
@@ -770,6 +779,27 @@ export function apply(ctx, config) {
           activity: liveStatus(profile.sessionId),
           personaDrift: Boolean(profile.personaDrift),
         })),
+      }
+    },
+    /** Read of the Kanban board for a Team Mode workspace, so the Team view can show the board inside
+     * any session — including a role session, where the board's own panel cannot resolve a workspace. */
+    async boardSnapshot(payload) {
+      const workspaceId = payload?.workspaceId
+      if (!workspaceId) return { ok: false, error: 'workspaceId is required' }
+      const data = await dataOf(workspaceId, payload?.path)
+      const read = await kanbanReadBoard(workspaceId)
+      if (!read?.ok) return { ok: false, error: read?.error ?? 'the Kanban board could not be read' }
+      const board = read.value?.board ?? read.value
+      const cards = Array.isArray(board?.cards) ? board.cards : []
+      return {
+        ok: true,
+        workspaceId,
+        path: data.path ?? null,
+        columns: Array.isArray(board?.columns) ? board.columns : [],
+        cards,
+        laneCards: cards.filter((card) => String(card?.title ?? '').startsWith('[TM')),
+        tasks: (data.tasks ?? []).filter((task) => task.status === 'active' || task.status === 'queued' || task.status === 'awaiting_approval').map(taskView),
+        profiles: (data.profiles ?? []).map((profile) => ({ role: profile.role, sessionId: profile.sessionId, activity: liveStatus(profile.sessionId) })),
       }
     },
     async ping(payload) {
