@@ -109,9 +109,23 @@ panel's Roles editor reads and writes the user copy; deleting it falls back to t
 default. A changed role file is reported as *role file changed* on the profile: the new text
 applies to profiles created after the change, and recreating a live profile is your decision.
 
+## What the platform panels show, and what Team Mode cannot put there
+
+- `Agent Team → Members` lists **teammates** (the experimental agent-team roster). Team Mode roles are not
+  teammates: they are continuable subagent activations with their own session, persona and board identity.
+  They are visible in the subagent lineage chip beside the session title, in the Team panel (`sidebar`
+  icon → `main` panel, key `team-mode`) and in the new Team board view; adding them to the Members popover
+  would mean registering them into another plugin's roster, which the plugin does not do.
+- Role chats are not separate rows in the sidebar workspace list: a role session is reached from the
+  Manager chat. That is intentional in v1 — one dialog with the Manager, every role reachable from it.
+
 ## Limits and honesty
 
 
+- Every chat gets a **Team board** tab (`conversation.view` registration, id `team-board`): the Manager
+  chat and each role session can open the Team Mode tasks, the role profiles with their live activity and
+  the `[TM …]` lane cards. It names the workspace itself instead of letting the board guess, which is why
+  it works in a role session where the shipped Board tab answers `Unknown workspace: default`.
 - The Kanban mirror (`kanbanSync`) is a one-way projection into a **`Team Mode` lane of its own**: the
   mirror creates that column, keeps every mirrored card there and writes the stage into the transition
   comment (`stage column: Test`). It never moves a card into a column the board's orchestrator owns,

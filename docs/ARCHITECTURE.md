@@ -134,6 +134,25 @@ Team Mode board stays authoritative and the board's own automation stays a stran
 `columnKeyFor` and `resolveColumnId` remain for that reporting and for a future mode that drives the
 board's columns deliberately.
 
+## The board inside a role session: why the shipped Board tab fails there and how Team Mode opens it
+
+The Kanban panel registers a **session-scoped conversation view** (`slots.register({ name:
+'conversation.view', id: 'kanban', order: 20 })`) and passes the client context's `uiWorkspace` into it.
+A chat opened through the subagent lineage — which is how a Team Mode role session is reached — has no
+workspace binding in that context, so the panel asks the board for workspace `default`, and the board's
+endpoint answers `Unknown workspace: default` (it only rescues an unnamed request when exactly one
+workspace is registered). This is not a Team Mode defect: a native subagent session carries the same
+header fields (`cwd`, `parentSession`, `origin: subagent`, `delegationDepth`, `agentPreset`) as a role
+session.
+
+Team Mode therefore does not let the board guess. The plugin registers its own conversation view
+(`id: 'team-board'`, order 21, label «Team board») which is reachable from **every** chat — the Manager
+chat and each role session alike — names the Team Mode workspace explicitly (a workspace selector when
+there is more than one) and asks the Host for `boardSnapshot { workspaceId }`. The Host reads the board
+through a session that can see the Kanban tools (`kanbanReadBoard` over `mirrorCandidates`) and returns
+columns, cards, the `[TM …]` lane cards, the open tasks and the role profiles with their live activity.
+Nothing in that path depends on the browser's workspace binding, so it works in a role session.
+
 ## Rules learned from the first real install (round 3)
 
 These are the reasons the mode appeared to "not work at all", in the order they were found.
