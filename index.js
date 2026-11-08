@@ -197,21 +197,23 @@ export function apply(ctx, config) {
     return out
   }
 
-  let kanbanLabelReady = false
   /**
    * Card creation fails when the label the mirror tags its cards with does not exist on the board, so the
-   * mirror creates that label once and falls back to an unlabelled card when the board refuses it.
+   * mirror creates that label and falls back to an unlabelled card when the board refuses it. Boards are
+   * per workspace and each has its own labels, so readiness is tracked per workspace — a label created on
+   * one board says nothing about another one.
    */
-  const ensureKanbanLabel = async (agent) => {
-    if (kanbanLabelReady) return true
+  const labelReadyWorkspaces = new Set()
+  const ensureKanbanLabel = async (agent, workspaceId) => {
+    if (labelReadyWorkspaces.has(workspaceId)) return true
     const read = await kanbanCall(agent, 'kanban_get_label', {})
     if (read?.ok && kanbanHasLabel(read.value, CARD_LABEL)) {
-      kanbanLabelReady = true
+      labelReadyWorkspaces.add(workspaceId)
       return true
     }
     const added = await kanbanCall(agent, 'kanban_add_label', { name: CARD_LABEL, color: '#7c5cff' })
-    kanbanLabelReady = Boolean(added?.ok)
-    return kanbanLabelReady
+    if (added?.ok) labelReadyWorkspaces.add(workspaceId)
+    return Boolean(added?.ok)
   }
 
   const mirrorCard = async (workspace, task, seedAgent) => {
@@ -221,7 +223,7 @@ export function apply(ctx, config) {
     let lastError = null
     for (const candidate of await mirrorCandidates(seedAgent, workspace.id)) {
       const payload = cardPayload(task)
-      if (!(await ensureKanbanLabel(candidate))) delete payload.label
+      if (!(await ensureKanbanLabel(candidate, workspace.id))) delete payload.label
       created = await kanbanCall(candidate, 'kanban_add_card', payload)
       if (created?.ok) { runner = candidate; break }
       lastError = created?.error ?? lastError
